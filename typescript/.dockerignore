@@ -1,0 +1,10 @@
+node_modules
+.next
+data
+results
+.env*
+*.tsbuildinfo
+.DS_Store
+loadtest
+chaos
+eval

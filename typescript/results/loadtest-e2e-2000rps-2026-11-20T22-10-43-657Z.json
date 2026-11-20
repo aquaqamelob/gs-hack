@@ -1,0 +1,66 @@
+{
+  "at": "2026-11-20T22:10:43.657Z",
+  "mode": "e2e",
+  "targetRate": 2000,
+  "durationSec": 15,
+  "sent": 30000,
+  "httpErrors": 0,
+  "achievedRate": 1997.9,
+  "maxInflight": 80,
+  "http": {
+    "p50": 2.7,
+    "p95": 20.4,
+    "p99": 34.1,
+    "max": 265.8
+  },
+  "server": {
+    "ingested": 30000,
+    "alertsCreated": 30000,
+    "noiseReduction": 1,
+    "delivered": 60000,
+    "pending": 0,
+    "dead": 0,
+    "processingMs": {
+      "p50": 0.076,
+      "p99": 0.449
+    },
+    "endToEnd": {
+      "all": {
+        "count": 50000,
+        "p50": 1,
+        "p95": 9,
+        "p99": 16,
+        "max": 38
+      },
+      "phone": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "sms": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "email": {
+        "count": 25000,
+        "p50": 1,
+        "p95": 9,
+        "p99": 16,
+        "max": 38
+      },
+      "ui": {
+        "count": 25000,
+        "p50": 1,
+        "p95": 9,
+        "p99": 16,
+        "max": 38
+      }
+    },
+    "instance": "pid-19256"
+  }
+}

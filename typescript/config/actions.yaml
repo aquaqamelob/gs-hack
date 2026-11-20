@@ -1,0 +1,26 @@
+# Every runbook action is a webhook. A new action is a new entry here, not code.
+# Templates: step params ({{workflowId}}), alert fields ({{service}}, {{entity_id}}, {{alert.id}}),
+# and allowlisted env vars ({{env.WORKFLOW_API}}). Secrets live only in env, never in this file or in runbooks.
+# Target hosts must be in ACTION_ALLOWED_HOSTS.
+actions:
+  http_get:
+    description: Health check
+    method: GET
+    url: "{{url}}"
+
+  retry_workflow:
+    description: Retry workflow
+    method: POST
+    url: "{{env.WORKFLOW_API}}/workflows/{{workflowId}}/retry"
+    headers:
+      authorization: "Bearer {{env.WORKFLOW_API_TOKEN}}"
+
+  escalate:
+    description: Escalate to
+    method: POST
+    url: "{{env.ESCALATION_API}}/escalations"
+    body:
+      team: "{{team}}"
+      alert: "{{alert.id}}"
+      title: "{{alert.title}}"
+    approval: required

@@ -1,0 +1,74 @@
+# One command: docker compose up --build   →  http://localhost:3000
+# Scale the stateless app: APP_REPLICAS=3 docker compose up --build
+# Postgres is the only stateful component.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ctrl
+    command: ["postgres", "-c", "max_connections=300"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ctrl"]
+      interval: 2s
+      retries: 30
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda start --mode dev-container --smp 1 --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports: ["19092:19092"]
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 3s
+      retries: 40
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports: ["8025:8025"]
+
+  # SMS / phone gateway mock and the target of runbook webhooks.
+  mock-gateway:
+    build: ./mock-gateway
+    networks:
+      default:
+        aliases: [counterparty-service, workflow-api, escalation-api]
+    ports: ["4010:80"]
+
+  app:
+    build: .
+    deploy:
+      replicas: ${APP_REPLICAS:-1}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redpanda: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ctrl
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_TOPICS: events,logs
+      SMS_GATEWAY_URL: http://mock-gateway
+      SMTP_URL: smtp://mailhog:1025
+      MAILHOG_UI_URL: http://localhost:8025
+      PUBLIC_URL: http://localhost:3000
+      WORKFLOW_API: http://workflow-api
+      ESCALATION_API: http://escalation-api
+      ACTION_ALLOWED_HOSTS: counterparty-service,workflow-api,escalation-api
+      INGEST_TOKEN_PARTNER: ${INGEST_TOKEN_PARTNER:-dev-partner-token}
+      INGEST_HMAC_PAYMENTS: ${INGEST_HMAC_PAYMENTS:-dev-payments-hmac}
+      LLM_ENABLED: ${LLM_ENABLED:-false}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+
+  lb:
+    image: nginx:1.27-alpine
+    volumes: ["./deploy/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on: [app]
+    ports: ["3000:80"]
+
+volumes:
+  pgdata:

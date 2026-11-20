@@ -1,0 +1,90 @@
+# Routing rules. Edited here or in the console; every instance reloads within a second.
+# Operators: eq, neq, in, not_in, gt, gte, lt, lte, regex, glob, exists. Nest with all/any.
+# Fields: canonical (severity, service, environment, error.code, error.message, timestamp, entity_id, title),
+#         source, schema, or any raw path from the event.
+# Grouping follows Alertmanager: group_by (dedup key), group_wait, group_interval. dedup_window closes quiet alerts.
+rules:
+  - id: settlements-workflow-failed
+    name: Settlement workflow failures (prod)
+    team: team-settlements
+    when:
+      all:
+        - { field: title, op: eq, value: WORKFLOW_FAILED }
+        - { field: workflowName, op: eq, value: order-settlement }
+        - { field: environment, op: eq, value: prod }
+    notify:
+      - to: team-settlements
+        channels: [phone, sms, ui]
+    present:
+      title: "Settlement failed at {{step}}: {{error.code}}"
+      body: "{{error.message}}"
+      fields: [workflowId, step, error.message]
+      color: red
+    group_by: [workflowName, step, error.code]
+    group_wait: 0s
+    group_interval: 5m
+    dedup_window: 15m
+    runbook: settlement-timeout
+
+  - id: pricing-log-warnings
+    name: Pricing engine warnings
+    team: team-pricing
+    when:
+      all:
+        - { field: source, op: eq, value: logs }
+        - { field: service, op: glob, value: pricing-engine-* }
+        - { field: severity, op: gte, value: warning }
+    notify:
+      - to: team-pricing
+        channels: [ui]
+    present:
+      title: "Pricing latency on {{instrument}}"
+      body: "{{error.message}} — {{latency_ms | default:n/a}} ms on {{service}}"
+      fields: [instrument, latency_ms, service]
+      color: amber
+    group_by: [instrument]
+    group_wait: 10s
+    group_interval: 5m
+    dedup_window: 30m
+    runbook: pricing-latency
+
+  - id: rates-large-rejections
+    name: Large rejected trades on the rates desk
+    team: team-rates
+    when:
+      all:
+        - { field: meta.schema, op: glob, value: trade.rejected.* }
+        - { field: payload.desk, op: eq, value: rates }
+        - { field: payload.notional, op: gt, value: 10000000 }
+    notify:
+      - to: team-rates
+        channels: [email, ui]
+    present:
+      title: "Rejected {{payload.currency}} {{payload.notional | number}} — {{payload.reason}}"
+      body: "Trade {{payload.tradeId}} on desk {{payload.desk}} was rejected by {{meta.producer}}."
+      fields: [payload.tradeId, payload.desk, payload.notional, payload.currency, payload.reason]
+      severity: error
+      color: orange
+    group_by: [payload.tradeId]
+    group_wait: 0s
+    group_interval: 10m
+    dedup_window: 1h
+
+  - id: anna-payments-critical
+    name: Anna — critical payments-api
+    team: anna
+    when:
+      all:
+        - { field: severity, op: eq, value: critical }
+        - { field: service, op: eq, value: payments-api }
+    notify:
+      - to: anna
+    present:
+      title: "{{title}} on {{service}} ({{labels.region}})"
+      body: "{{error.message}}"
+      fields: [labels.region, labels.severity, status]
+    group_by: [title, service]
+    group_wait: 0s
+    group_interval: 10m
+    dedup_window: 1h
+    runbook: payments-high-error-rate
