@@ -57,12 +57,8 @@ services:
       WORKFLOW_API: http://workflow-api
       ESCALATION_API: http://escalation-api
       ACTION_ALLOWED_HOSTS: counterparty-service,workflow-api,escalation-api
-      INGEST_TOKEN_PARTNER: ${INGEST_TOKEN_PARTNER:-dev-partner-token}
-      INGEST_HMAC_PAYMENTS: ${INGEST_HMAC_PAYMENTS:-dev-payments-hmac}
-      LLM_ENABLED: ${LLM_ENABLED:-false}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
-      LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
-      LLM_API_KEY: ${LLM_API_KEY:-}
+      INGEST_TOKEN_PARTNER: dev-partner-token
+      INGEST_HMAC_PAYMENTS: dev-payments-hmac
 
   lb:
     image: nginx:1.27-alpine
