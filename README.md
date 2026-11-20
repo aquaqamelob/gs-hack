@@ -29,6 +29,8 @@ APP_REPLICAS=3 docker compose up --build
 
 Stop with `Ctrl+C`; `docker compose down -v` also deletes the database.
 
+**GitHub Codespaces:** open the repo in a Codespace (the dev container installs Bun and Docker), then run `docker compose up --build` in its terminal. Ports 3000, 8025 and 4010 are forwarded automatically.
+
 ### Try it
 
 On **Live alerts**, the *Simulate* buttons replay the events from the brief: workflow failure, a burst of 500 duplicates, an Alertmanager alert and its resolution, a rejected trade, pricing log lines, and an unknown schema. Or send your own:
