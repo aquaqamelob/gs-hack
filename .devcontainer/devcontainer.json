@@ -1,0 +1,16 @@
+{
+  "name": "CTRL",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postCreateCommand": "curl -fsSL https://bun.sh/install | bash && ~/.bun/bin/bun install",
+  "remoteEnv": { "PATH": "${containerEnv:PATH}:/home/vscode/.bun/bin" },
+  "forwardPorts": [3000, 8025, 4010],
+  "portsAttributes": {
+    "3000": { "label": "CTRL console" },
+    "8025": { "label": "MailHog" },
+    "4010": { "label": "Mock gateway" }
+  },
+  "hostRequirements": { "cpus": 4, "memory": "8gb" }
+}
