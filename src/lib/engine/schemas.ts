@@ -43,7 +43,9 @@ function fromRow(r: Row): SchemaRecord {
   }
 }
 
-const pendingCounts = new Map<string, number>()
+// Shared through globalThis: API routes and the instrumentation loop that flushes it load separate module copies.
+const COUNTS_KEY = Symbol.for('ctrl.schema-counts.v1')
+const pendingCounts: Map<string, number> = ((globalThis as Record<symbol, unknown>)[COUNTS_KEY] ??= new Map()) as Map<string, number>
 
 export function invalidateSchema(fp: string) {
   rt().schemas.delete(fp)
@@ -207,7 +209,8 @@ export async function decideProposal(fp: string, canonical: CanonicalKey, path: 
 export async function setMapping(fp: string, canonical: CanonicalKey, path: string | null, actor: string) {
   const s = await mutate(fp, (s) => {
     if (path) {
-      if (!s.fields.some((f) => f.path === path)) throw new Error(`Field "${path}" is not in this schema`)
+      if (!s.fields.some((f) => f.path === path) && !/^[\w$@-]+(\.[\w$@-]+)*$/.test(path))
+        throw new Error(`"${path}" is not a field path (use dots for nesting, e.g. details.reason)`)
       s.mapping[canonical] = path
       s.mappedBy[canonical] = 'human'
       s.confidence[canonical] = 1
