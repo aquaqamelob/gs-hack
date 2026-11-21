@@ -1,6 +1,6 @@
 # One command: docker compose up --build   →  http://localhost:3000
 # Scale the stateless app: APP_REPLICAS=3 docker compose up --build
-# Postgres is the only stateful component.
+# State: Postgres, plus the config/ directory bind-mounted into every replica.
 services:
   postgres:
     image: postgres:16-alpine
@@ -43,6 +43,9 @@ services:
     build: .
     deploy:
       replicas: ${APP_REPLICAS:-1}
+    # One config/ shared by every replica (and by git): edits from the UI land on the host and the
+    # other replicas pick them up within ~1 s (mtime polling). `:z` lets SELinux hosts share the mount.
+    volumes: ["./config:/app/config:z"]
     depends_on:
       postgres: { condition: service_healthy }
       redpanda: { condition: service_healthy }

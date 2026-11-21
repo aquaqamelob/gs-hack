@@ -27,6 +27,8 @@ Three instances behind the load balancer:
 APP_REPLICAS=3 docker compose up --build
 ```
 
+All replicas share one `config/` directory (bind mount from the repo). Edit it from the UI or in git: every replica hot-reloads within about 1 s, and the change survives `docker compose restart app`. Writes from the UI are serialized across replicas with a Postgres advisory lock and always start from the file on disk, so two concurrent edits never overwrite each other; a save based on a stale copy gets `409` and the UI reloads.
+
 Stop with `Ctrl+C`; `docker compose down -v` also deletes the database.
 
 **GitHub Codespaces:** open the repo in a Codespace (the dev container installs Bun and Docker), then run `docker compose up --build` in its terminal. Ports 3000, 8025 and 4010 are forwarded automatically.
@@ -57,7 +59,7 @@ Simulate an outage: `docker compose stop mock-gateway`, trigger an alert, watch 
 
 | Service | Role |
 | --- | --- |
-| `app` | CTRL (Next.js on Bun). Stateless, scale with `APP_REPLICAS` |
+| `app` | CTRL (Next.js on Bun). Stateless, scale with `APP_REPLICAS`; `config/` is a bind mount shared by all replicas |
 | `lb` | nginx in front of the app replicas (SSE buffering off) |
 | `postgres` | the only state: events, schemas, alerts, outbox, audit log |
 | `redpanda` | Kafka-compatible broker |
@@ -97,7 +99,7 @@ bun run smoke                    # 28 end-to-end checks against the running stac
 ## Layout
 
 ```
-config/          rules.yaml, recipients.yaml, actions.yaml, runbooks/
+config/          rules.yaml, recipients.yaml, actions.yaml, fields.yaml, runbooks/ (shared by all replicas)
 db/schema.sql    Postgres schema (applied on start under an advisory lock)
 src/lib/engine/  pipeline, schemas, rules, outbox, channels, alerts, runbooks, actions, kafka, auth
 src/app/api/     ingest, stream (SSE), alerts, rules, schemas, runbooks, recipients, me, reply, system, metrics
