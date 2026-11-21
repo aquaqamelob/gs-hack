@@ -4,16 +4,41 @@
 
 type Message = { id: number; channel: string; to: string; text: string; key: string; at: number; host?: string; method?: string; path?: string }
 
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+
 const port = Number(process.env.PORT ?? 4010)
 const messages: Message[] = []
 const seen = new Map<string, number>()
+/** Every POST per idempotency key, repeats included: how often CTRL resent a message the provider absorbed. */
+const receipts = new Map<string, number>()
 let seq = 0
 let down = false
+
+// Optional append-only log so `docker compose stop/start` keeps history and idempotency (used by scripts/chaos.ts).
+const LOG = process.env.MOCK_LOG ?? ''
+if (LOG && existsSync(LOG)) {
+  for (const line of readFileSync(LOG, 'utf8').split('\n')) {
+    if (!line) continue
+    try {
+      const m = JSON.parse(line) as Message
+      messages.push(m)
+      seq = Math.max(seq, m.id)
+      if (m.key) seen.set(m.key, m.id)
+    } catch {
+      /* torn last line after a hard stop */
+    }
+  }
+  if (messages.length > 5000) messages.splice(0, messages.length - 5000)
+  console.log(`[mock-gateway] restored ${seen.size} keys from ${LOG}`)
+}
+if (LOG) mkdirSync(dirname(LOG), { recursive: true })
 
 function record(m: Omit<Message, 'id' | 'at'>) {
   const msg = { ...m, id: ++seq, at: Date.now() }
   messages.push(msg)
   if (messages.length > 5000) messages.splice(0, messages.length - 5000)
+  if (LOG) appendFileSync(LOG, JSON.stringify(msg) + '\n')
   return msg
 }
 
@@ -40,6 +65,13 @@ Bun.serve({
       const by: Record<string, number> = {}
       for (const m of messages) by[m.channel] = (by[m.channel] ?? 0) + 1
       return json({ total: messages.length, uniqueKeys: seen.size, byChannel: by, down })
+    }
+    // For the chaos test: per key, how many messages were recorded (should be 1) and how many POSTs arrived.
+    if (path === '/lookup' && req.method === 'POST') {
+      const { keys } = (await req.json().catch(() => ({ keys: [] }))) as { keys?: string[] }
+      const recorded = new Map<string, number>()
+      for (const m of messages) if (m.key) recorded.set(m.key, (recorded.get(m.key) ?? 0) + 1)
+      return json(Object.fromEntries((keys ?? []).map((k) => [k, { recorded: recorded.get(k) ?? (seen.has(k) ? 1 : 0), receipts: receipts.get(k) ?? 0 }])))
     }
     if (path === '/chaos' && req.method === 'POST') {
       down = Boolean(((await req.json().catch(() => ({}))) as { down?: boolean }).down)
@@ -68,6 +100,7 @@ Bun.serve({
     if ((path === '/sms' || path === '/phone') && req.method === 'POST') {
       const body = (await req.json().catch(() => ({}))) as { to?: string; text?: string; key?: string }
       const key = req.headers.get('idempotency-key') ?? body.key ?? ''
+      if (key) receipts.set(key, (receipts.get(key) ?? 0) + 1)
       if (key && seen.has(key)) return json({ id: seen.get(key), duplicate: true })
       const msg = record({ channel: path.slice(1), to: String(body.to ?? ''), text: String(body.text ?? ''), key })
       if (key) seen.set(key, msg.id)
