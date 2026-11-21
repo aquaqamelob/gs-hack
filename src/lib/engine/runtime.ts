@@ -14,7 +14,6 @@ export interface Runtime {
   runbooks: Map<string, Runbook>
   actions: Record<string, WebhookAction & { approval?: 'none' | 'required'; description?: string }>
   schemas: Map<string, SchemaRecord>
-  llmEnabled: boolean
   counters: Map<string, number>
   bus: EventEmitter
   booted?: Promise<void>
@@ -35,7 +34,6 @@ export function rt(): Runtime {
       runbooks: new Map(),
       actions: {},
       schemas: new Map(),
-      llmEnabled: process.env.LLM_ENABLED === 'true',
       counters: new Map(),
       bus,
     }
@@ -55,4 +53,3 @@ export type BusEvent =
   | { type: 'schema'; id: string }
   | { type: 'config'; what: string }
   | { type: 'audit' }
-  | { type: 'llm'; enabled: boolean }

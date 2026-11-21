@@ -15,12 +15,20 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 type Data = {
   schemas: SchemaRecord[]
   canonical: Record<CanonicalKey, string>
-  llm: { enabled: boolean; model: string }
 }
 
 type Mapping = Partial<Record<CanonicalKey, string>>
 
-const KEYS: CanonicalKey[] = ['title', 'severity', 'service', 'environment', 'error.message', 'error.code', 'entity_id', 'timestamp']
+const KEYS: CanonicalKey[] = [
+  'title',
+  'severity',
+  'service',
+  'environment',
+  'error.message',
+  'error.code',
+  'entity_id',
+  'timestamp',
+]
 
 const QUESTION: Record<CanonicalKey, string> = {
   title: 'What kind of event is it?',
@@ -37,7 +45,6 @@ const BY_BADGE: Record<MappedBy, { color: 'zinc' | 'violet' | 'green' | 'sky' | 
   'known-format': { color: 'sky', label: 'known format' },
   deterministic: { color: 'zinc', label: 'rules' },
   fuzzy: { color: 'amber', label: 'fuzzy' },
-  llm: { color: 'violet', label: 'AI' },
   human: { color: 'green', label: 'you' },
 }
 
@@ -147,7 +154,13 @@ function MappingRow({
         )}
         {path && level !== 'expert' && (
           <div className="mt-1 truncate text-xs text-zinc-500">
-            {value === undefined ? 'no value in the example' : <>example: <span className="font-medium text-zinc-700 dark:text-zinc-300">{show(value)}</span></>}
+            {value === undefined ? (
+              'no value in the example'
+            ) : (
+              <>
+                example: <span className="font-medium text-zinc-700 dark:text-zinc-300">{show(value)}</span>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -158,7 +171,9 @@ function MappingRow({
           ) : (
             <Badge color={BY_BADGE[by].color}>
               {BY_BADGE[by].label}
-              {level === 'expert' && confidence !== undefined && confidence < 1 ? ` ${Math.round(confidence * 100)}%` : ''}
+              {level === 'expert' && confidence !== undefined && confidence < 1
+                ? ` ${Math.round(confidence * 100)}%`
+                : ''}
             </Badge>
           ))}
       </div>
@@ -221,13 +236,14 @@ function Proposals({
               {level === 'simple' ? (
                 <>
                   We think <strong>{p.path}</strong>
-                  {show(getPath(sample, p.path)) && <> (e.g. “{show(getPath(sample, p.path))}”)</>} answers <strong>{QUESTION[p.canonical].toLowerCase()}</strong>
+                  {show(getPath(sample, p.path)) && <> (e.g. “{show(getPath(sample, p.path))}”)</>} answers{' '}
+                  <strong>{QUESTION[p.canonical].toLowerCase()}</strong>
                 </>
               ) : (
                 <>
                   <code className="font-semibold">{p.path}</code> → <strong>{p.canonical}</strong>{' '}
-                  <Badge color={p.by === 'llm' ? 'violet' : 'amber'}>
-                    {p.by === 'llm' ? 'AI' : 'fuzzy'}
+                  <Badge color="amber">
+                    fuzzy
                     {level === 'expert' ? ` · ${Math.round(p.confidence * 100)}%` : ''}
                   </Badge>
                   {p.reason && <span className="ml-2 text-sm text-zinc-500">{p.reason}</span>}
@@ -280,7 +296,15 @@ function setPath(obj: Record<string, Json>, path: string, value: Json) {
   })
 }
 
-function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical: Record<CanonicalKey, string>; onRegistered: (fp: string) => void }) {
+function NewSchema({
+  level,
+  canonical,
+  onRegistered,
+}: {
+  level: Level
+  canonical: Record<CanonicalKey, string>
+  onRegistered: (fp: string) => void
+}) {
   const [rows, setRows] = useState<FieldRow[]>([
     { path: '', example: '', means: '' },
     { path: '', example: '', means: '' },
@@ -301,7 +325,8 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
     if (jsonText.trim()) {
       try {
         const parsed = JSON.parse(jsonText)
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'The JSON must be an object: { … }' }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+          return { error: 'The JSON must be an object: { … }' }
         sample = parsed
       } catch {
         return { error: 'The JSON is not valid yet.' }
@@ -322,7 +347,10 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
     if (!Object.keys(built.sample).length) return setPreview(null)
     const t = setTimeout(async () => {
       try {
-        setPreview((await api<{ preview: Preview }>('/api/schemas', { body: { op: 'preview', sample: built.sample, source } })).preview)
+        setPreview(
+          (await api<{ preview: Preview }>('/api/schemas', { body: { op: 'preview', sample: built.sample, source } }))
+            .preview
+        )
       } catch (e) {
         setErr((e as Error).message)
       }
@@ -353,7 +381,8 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
     }
   }
 
-  const updateRow = (i: number, patch: Partial<FieldRow>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const updateRow = (i: number, patch: Partial<FieldRow>) =>
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
 
   return (
     <div className="space-y-6 rounded-xl border border-zinc-950/10 p-5 dark:border-white/10">
@@ -376,8 +405,16 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
           </div>
           {rows.map((r, i) => (
             <div key={i} className="grid grid-cols-[1fr_1fr_11rem_auto] items-center gap-2">
-              <Input value={r.path} onChange={(e) => updateRow(i, { path: e.target.value })} placeholder={i === 0 ? 'evt_kind' : i === 1 ? 'lvl' : 'details.reason'} />
-              <Input value={r.example} onChange={(e) => updateRow(i, { example: e.target.value })} placeholder={i === 0 ? 'PAYMENT_STUCK' : i === 1 ? 'P1' : 'ACK_TIMEOUT'} />
+              <Input
+                value={r.path}
+                onChange={(e) => updateRow(i, { path: e.target.value })}
+                placeholder={i === 0 ? 'evt_kind' : i === 1 ? 'lvl' : 'details.reason'}
+              />
+              <Input
+                value={r.example}
+                onChange={(e) => updateRow(i, { example: e.target.value })}
+                placeholder={i === 0 ? 'PAYMENT_STUCK' : i === 1 ? 'P1' : 'ACK_TIMEOUT'}
+              />
               <Select value={r.means} onChange={(e) => updateRow(i, { means: e.target.value as CanonicalKey | '' })}>
                 <option value="">{level === 'simple' ? 'let CTRL guess' : 'auto'}</option>
                 {KEYS.map((k) => (
@@ -398,8 +435,16 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
           <div className="pt-2">
             {showJson ? (
               <>
-                <div className="mb-1 text-xs font-medium text-zinc-500">{level === 'simple' ? 'Example message (optional)' : 'Example JSON (optional, merged with the rows)'}</div>
-                <Textarea rows={7} value={jsonText} onChange={(e) => setJsonText(e.target.value)} className="font-mono text-xs" placeholder='{"evt_kind": "PAYMENT_STUCK", "lvl": "P1", "details": {"failure_reason": "ACK_TIMEOUT"}}' />
+                <div className="mb-1 text-xs font-medium text-zinc-500">
+                  {level === 'simple' ? 'Example message (optional)' : 'Example JSON (optional, merged with the rows)'}
+                </div>
+                <Textarea
+                  rows={7}
+                  value={jsonText}
+                  onChange={(e) => setJsonText(e.target.value)}
+                  className="font-mono text-xs"
+                  placeholder='{"evt_kind": "PAYMENT_STUCK", "lvl": "P1", "details": {"failure_reason": "ACK_TIMEOUT"}}'
+                />
               </>
             ) : (
               <Button plain onClick={() => setShowJson(true)}>
@@ -409,7 +454,12 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-zinc-500">{level === 'simple' ? 'Sent by' : 'Source'}</span>
-            <Input value={source} onChange={(e) => setSource(e.target.value)} className="max-w-40" aria-label="Source name" />
+            <Input
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              className="max-w-40"
+              aria-label="Source name"
+            />
           </div>
           {err && <p className="text-sm text-red-600">{err}</p>}
         </div>
@@ -419,13 +469,23 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold">{preview.name}</span>
-                <Badge color={STATUS[preview.status].color}>{level === 'simple' ? STATUS[preview.status].simple : STATUS[preview.status].label}</Badge>
-                {level === 'expert' && <code className="text-xs text-zinc-500">fp {preview.fingerprint.slice(0, 12)}</code>}
+                <Badge color={STATUS[preview.status].color}>
+                  {level === 'simple' ? STATUS[preview.status].simple : STATUS[preview.status].label}
+                </Badge>
+                {level === 'expert' && (
+                  <code className="text-xs text-zinc-500">fp {preview.fingerprint.slice(0, 12)}</code>
+                )}
               </div>
-              <Text className="mt-1">{level === 'simple' ? 'Check the answers below and change any that are wrong.' : 'Proposed mapping. Change anything before registering.'}</Text>
+              <Text className="mt-1">
+                {level === 'simple'
+                  ? 'Check the answers below and change any that are wrong.'
+                  : 'Proposed mapping. Change anything before registering.'}
+              </Text>
               <div className="mt-3">
                 <Proposals
-                  proposals={preview.proposals.filter((p) => !(p.canonical in finalMapping) && !dismissed.has(`${p.canonical}:${p.path}`))}
+                  proposals={preview.proposals.filter(
+                    (p) => !(p.canonical in finalMapping) && !dismissed.has(`${p.canonical}:${p.path}`)
+                  )}
                   level={level}
                   sample={'sample' in built ? (built.sample as Json) : {}}
                   onDecide={(p, accept) =>
@@ -450,7 +510,11 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
               </Button>
             </>
           ) : (
-            <Text>{level === 'simple' ? 'Start typing fields on the left; CTRL shows what it understands here.' : 'The proposed mapping appears here as you type.'}</Text>
+            <Text>
+              {level === 'simple'
+                ? 'Start typing fields on the left; CTRL shows what it understands here.'
+                : 'The proposed mapping appears here as you type.'}
+            </Text>
           )}
         </div>
       </div>
@@ -460,7 +524,17 @@ function NewSchema({ level, canonical, onRegistered }: { level: Level; canonical
 
 // ---------------------------------------------------------------- stored schema
 
-function SchemaDetail({ schema, data, level, reload }: { schema: SchemaRecord; data: Data; level: Level; reload: () => void }) {
+function SchemaDetail({
+  schema,
+  data,
+  level,
+  reload,
+}: {
+  schema: SchemaRecord
+  data: Data
+  level: Level
+  reload: () => void
+}) {
   const [name, setName] = useState(schema.name)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
@@ -486,39 +560,26 @@ function SchemaDetail({ schema, data, level, reload }: { schema: SchemaRecord; d
     <div className="space-y-8">
       <div className="flex flex-wrap items-center gap-3">
         <Input value={name} onChange={(e) => setName(e.target.value)} className="max-w-xs" aria-label="Schema name" />
-        <Badge color={STATUS[schema.status].color}>{level === 'simple' ? STATUS[schema.status].simple : STATUS[schema.status].label}</Badge>
+        <Badge color={STATUS[schema.status].color}>
+          {level === 'simple' ? STATUS[schema.status].simple : STATUS[schema.status].label}
+        </Badge>
         <span className="text-sm text-zinc-500">
-          {level === 'simple' ? `from ${schema.source}` : `source ${schema.source}`} · {schema.eventCount.toLocaleString()} messages · last{' '}
-          {schema.lastSeen ? timeAgo(schema.lastSeen) : 'never'}
+          {level === 'simple' ? `from ${schema.source}` : `source ${schema.source}`} ·{' '}
+          {schema.eventCount.toLocaleString()} messages · last {schema.lastSeen ? timeAgo(schema.lastSeen) : 'never'}
         </span>
         {level === 'expert' && <code className="text-xs text-zinc-500">fp {schema.fingerprint}</code>}
       </div>
 
       {level === 'simple' ? (
         <Text>
-          Answer the questions below by picking the field that holds each piece of information. CTRL then uses them to route and
-          describe alerts. Unknown fields are fine; you can leave answers empty.
+          Answer the questions below by picking the field that holds each piece of information. CTRL then uses them to
+          route and describe alerts. Unknown fields are fine; you can leave answers empty.
         </Text>
       ) : (
         <div className="rounded-lg bg-zinc-50 p-4 text-sm dark:bg-zinc-800/50">
-          <strong>How this works:</strong> computed once per schema and stored. 1) Deterministic: names, synonyms, value formats,
-          known formats like Alertmanager. 2) Fuzzy tiebreak: similar names, only when the distinguishing word matches. 3)
-          Optional AI: sees only leftover field names, types and formats, never values. Uncertain proposals wait for a human ✓.
-          Raw paths always work in rules.
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Badge color={data.llm.enabled ? 'violet' : 'zinc'}>{data.llm.enabled ? `AI: ${data.llm.model}` : 'AI off'}</Badge>
-            {schema.llm.state !== 'idle' && (
-              <span className="text-zinc-500">
-                AI {schema.llm.state}
-                {schema.llm.detail ? ` — ${schema.llm.detail}` : ''}
-              </span>
-            )}
-            {data.llm.enabled && (
-              <Button outline disabled={busy !== ''} onClick={() => op({ op: 'ask-ai' })}>
-                {busy === 'ask-ai' ? 'Asking AI…' : 'Ask AI for missing fields'}
-              </Button>
-            )}
-          </div>
+          <strong>How this works:</strong> computed once per schema and stored. 1) Deterministic: names, synonyms, value
+          formats, known formats like Alertmanager. 2) Fuzzy tiebreak: similar names, only when the distinguishing word
+          matches. Uncertain proposals wait for a human ✓. Raw paths always work in rules.
         </div>
       )}
 
@@ -526,7 +587,9 @@ function SchemaDetail({ schema, data, level, reload }: { schema: SchemaRecord; d
         proposals={pending}
         level={level}
         sample={schema.sample}
-        onDecide={(p, accept) => op({ op: accept ? 'accept' : 'reject', canonical: p.canonical, path: p.path }, `${p.canonical}`)}
+        onDecide={(p, accept) =>
+          op({ op: accept ? 'accept' : 'reject', canonical: p.canonical, path: p.path }, `${p.canonical}`)
+        }
       />
 
       <section>
@@ -586,7 +649,9 @@ function SchemaDetail({ schema, data, level, reload }: { schema: SchemaRecord; d
       {level !== 'simple' && (
         <details open={level === 'expert'}>
           <summary className="cursor-pointer text-sm font-semibold">Example message (raw JSON)</summary>
-          <pre className="mt-2 max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">{JSON.stringify(schema.sample, null, 2)}</pre>
+          <pre className="mt-2 max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
+            {JSON.stringify(schema.sample, null, 2)}
+          </pre>
         </details>
       )}
     </div>
@@ -613,7 +678,9 @@ function Schemas() {
   const load = useCallback(async () => {
     const d = await api<Data>('/api/schemas')
     setData(d)
-    setSelected((s) => s ?? d.schemas.find((x) => x.status === 'needs-review')?.fingerprint ?? d.schemas[0]?.fingerprint ?? null)
+    setSelected(
+      (s) => s ?? d.schemas.find((x) => x.status === 'needs-review')?.fingerprint ?? d.schemas[0]?.fingerprint ?? null
+    )
   }, [])
   useEffect(() => {
     void load()
@@ -656,7 +723,11 @@ function Schemas() {
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[18rem_1fr]">
         <div>
-          {review > 0 && <p className="mb-2 text-sm font-medium text-amber-700 dark:text-amber-400">{review} need{review === 1 ? 's' : ''} review</p>}
+          {review > 0 && (
+            <p className="mb-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+              {review} need{review === 1 ? 's' : ''} review
+            </p>
+          )}
           <ul className="space-y-1">
             {data.schemas.map((s) => (
               <li key={s.fingerprint}>
@@ -669,8 +740,8 @@ function Schemas() {
                     {s.status === 'needs-review' && <span className="size-2 shrink-0 rounded-full bg-amber-500" />}
                   </div>
                   <div className="text-xs text-zinc-500">
-                    {s.source} · {s.eventCount.toLocaleString()} {level === 'simple' ? 'messages' : 'events'} · {Object.keys(s.mapping).length}/{KEYS.length}{' '}
-                    {level === 'simple' ? 'answered' : 'mapped'}
+                    {s.source} · {s.eventCount.toLocaleString()} {level === 'simple' ? 'messages' : 'events'} ·{' '}
+                    {Object.keys(s.mapping).length}/{KEYS.length} {level === 'simple' ? 'answered' : 'mapped'}
                   </div>
                 </button>
               </li>
@@ -678,7 +749,13 @@ function Schemas() {
             {data.schemas.length === 0 && <Text>No messages yet.</Text>}
           </ul>
         </div>
-        <div>{schema ? <SchemaDetail schema={schema} data={data} level={level} reload={load} /> : <Text>Select a schema.</Text>}</div>
+        <div>
+          {schema ? (
+            <SchemaDetail schema={schema} data={data} level={level} reload={load} />
+          ) : (
+            <Text>Select a schema.</Text>
+          )}
+        </div>
       </div>
     </>
   )

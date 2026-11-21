@@ -25,7 +25,7 @@ const RULE_ID = 'loadtest-e2e'
 const post = (path: string, body: unknown, method = 'POST') =>
   fetch(BASE + path, {
     method,
-    headers: { 'content-type': 'application/json', 'x-actor': 'loadtest' },
+    headers: { 'content-type': 'application/json', 'x-actor': 'admin' },
     body: JSON.stringify(body),
   })
 
@@ -158,7 +158,7 @@ async function main() {
     if (m.pending === 0) break
     await new Promise((r) => setTimeout(r, 500))
   }
-  if (MODE === 'e2e') await fetch(`${BASE}/api/rules?id=${RULE_ID}`, { method: 'DELETE' })
+  if (MODE === 'e2e') await fetch(`${BASE}/api/rules?id=${RULE_ID}`, { method: 'DELETE', headers: { 'x-actor': 'admin' } })
 
   latencies.sort((a, b) => a - b)
   const result = {

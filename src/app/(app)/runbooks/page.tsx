@@ -7,11 +7,11 @@ import { Input } from '@/components/input'
 import { Select } from '@/components/select'
 import { Text } from '@/components/text'
 import { Textarea } from '@/components/textarea'
-import { api, timeAgo, useLive } from '@/lib/client'
+import { api, useLive } from '@/lib/client'
 import type { Runbook, StepDef } from '@/lib/engine/types'
 import { useCallback, useEffect, useState } from 'react'
 
-type RunbookRow = Runbook & { aiProposal: { steps: StepDef[]; model: string; at: number } | null }
+type RunbookRow = Runbook
 type Data = {
   runbooks: RunbookRow[]
   actions: { name: string; description: string; method: string; url: string; approval: string }[]
@@ -72,8 +72,8 @@ function NewRunbook({ onSaved }: { onSaved: () => void }) {
       <div className="space-y-3">
         <Subheading>Add a runbook</Subheading>
         <Text>
-          Paste it as you have it. YAML: structured steps with actions. Markdown list: one step per item, approval wording is
-          detected. Free text or a wiki dump: one readable step, and AI can propose structure for you to approve.
+          Paste it as you have it. YAML: structured steps with actions. Markdown list: one step per item, approval
+          wording is detected. Free text or a wiki dump: one readable step shown as written.
         </Text>
         <div className="flex gap-2">
           <Input value={id} onChange={(e) => setId(e.target.value)} placeholder="id, e.g. swift-ack-timeout" />
@@ -159,8 +159,8 @@ export default function RunbooksPage() {
         <div>
           <Heading>Runbooks</Heading>
           <Text>
-            Files in <code>config/runbooks/</code>, reloaded live. Every format becomes the same list of steps. Steps that need
-            approval wait for a person (button, or SMS reply “YES 1234”).
+            Files in <code>config/runbooks/</code>, reloaded live. Every format becomes the same list of steps. Steps
+            that need approval wait for a person (button, or SMS reply “YES 1234”).
           </Text>
         </div>
         <Button color="dark/zinc" onClick={() => setAdding(!adding)}>
@@ -230,37 +230,6 @@ export default function RunbooksPage() {
               </div>
             </div>
 
-            {rb.format !== 'yaml' && (
-              <div className="rounded-lg border border-violet-300 p-4 dark:border-violet-500/30">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold">AI structuring (optional)</span>
-                  <Text>
-                    The AI turns prose into steps that may use the named actions below. Nothing is used until you accept it.
-                  </Text>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <Button outline disabled={busy !== ''} onClick={() => op('ai-structure')}>
-                    {busy === 'ai-structure' ? 'Thinking…' : 'Structure with AI'}
-                  </Button>
-                </div>
-                {rb.aiProposal && (
-                  <div className="mt-4 space-y-3">
-                    <Text>
-                      Proposal from {rb.aiProposal.model}, {timeAgo(rb.aiProposal.at)}:
-                    </Text>
-                    <Steps steps={rb.aiProposal.steps} />
-                    <div className="flex gap-2">
-                      <Button color="green" disabled={busy !== ''} onClick={() => op('accept-ai')}>
-                        ✓ Accept (saves as YAML)
-                      </Button>
-                      <Button outline disabled={busy !== ''} onClick={() => op('reject-ai')}>
-                        ✗ Reject
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
             {err && <p className="text-sm text-red-600">{err}</p>}
             <Button plain onClick={() => confirm(`Delete ${rb.file}?`) && op('delete')}>
               Delete runbook
@@ -272,8 +241,8 @@ export default function RunbooksPage() {
       <section className="mt-12">
         <Subheading>Named actions</Subheading>
         <Text>
-          There is one action kind: a webhook. Names below come from <code>config/actions.yaml</code>; a new action is a new entry
-          there, not code. Targets must be in <code>ACTION_ALLOWED_HOSTS</code>; secrets come from env vars.
+          There is one action kind: a webhook. Names below come from <code>config/actions.yaml</code>; a new action is a
+          new entry there, not code. Targets must be in <code>ACTION_ALLOWED_HOSTS</code>; secrets come from env vars.
         </Text>
         <ul className="mt-3 space-y-1 text-sm">
           {data.actions.map((a) => (

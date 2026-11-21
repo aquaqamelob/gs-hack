@@ -34,6 +34,8 @@ export async function handle(fn: () => Promise<Response>) {
     return await fn()
   } catch (e) {
     const msg = (e as Error).message
+    const forced = (e as { status?: unknown }).status
+    if (typeof forced === 'number') return fail(msg, forced)
     const status = /not found|unknown/i.test(msg) ? 404 : /ECONNREFUSED|connect/i.test(msg) ? 503 : 400
     return fail(msg, status)
   }

@@ -1,5 +1,5 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
-import { approveSchema, askLlmForSchema, decideProposal, getSchema, setMapping } from '@/lib/engine/schemas'
+import { approveSchema, decideProposal, getSchema, setMapping } from '@/lib/engine/schemas'
 import { CANONICAL_KEYS, type CanonicalKey } from '@/lib/engine/types'
 
 export const dynamic = 'force-dynamic'
@@ -13,10 +13,17 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   return handle(async () => {
-    const body = await readJson<{ op?: string; canonical?: CanonicalKey; path?: string | null; name?: string; actor?: string }>(req)
+    const body = await readJson<{
+      op?: string
+      canonical?: CanonicalKey
+      path?: string | null
+      name?: string
+      actor?: string
+    }>(req)
     const actor = actorOf(req, body)
     const needsKey = body.op === 'accept' || body.op === 'reject' || body.op === 'map'
-    if (needsKey && !CANONICAL_KEYS.includes(body.canonical as CanonicalKey)) return fail('canonical must be a canonical key')
+    if (needsKey && !CANONICAL_KEYS.includes(body.canonical as CanonicalKey))
+      return fail('canonical must be a canonical key')
     switch (body.op) {
       case 'accept':
       case 'reject':
@@ -24,9 +31,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         break
       case 'map':
         await setMapping(params.id, body.canonical!, body.path ?? null, actor)
-        break
-      case 'ask-ai':
-        await askLlmForSchema(params.id, actor)
         break
       case 'approve':
         await approveSchema(params.id, actor, body.name)

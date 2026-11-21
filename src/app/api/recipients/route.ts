@@ -1,4 +1,5 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
+import { assertCanEditRecipient, me } from '@/lib/engine/auth'
 import { audit } from '@/lib/engine/bus'
 import { insideWorkingHours } from '@/lib/engine/channels'
 import { saveRecipients } from '@/lib/engine/config'
@@ -29,13 +30,32 @@ export async function PUT(req: Request) {
     }
     const h = r.working_hours
     if (h) {
-      if (!/^\d{2}:\d{2}$/.test(h.from) || !/^\d{2}:\d{2}$/.test(h.to)) return fail('working_hours.from/to must be HH:MM')
-      if (!Array.isArray(h.outside) || !h.outside.every((c) => CHANNELS.includes(c))) return fail('working_hours.outside must list channels')
+      if (!/^\d{2}:\d{2}$/.test(h.from) || !/^\d{2}:\d{2}$/.test(h.to))
+        return fail('working_hours.from/to must be HH:MM')
+      if (!Array.isArray(h.outside) || !h.outside.every((c) => CHANNELS.includes(c)))
+        return fail('working_hours.outside must list channels')
+    }
+    if (r.role !== undefined && r.role !== 'admin' && r.role !== 'user') return fail('role must be admin or user')
+    if (
+      r.teams !== undefined &&
+      (!Array.isArray(r.teams) || !r.teams.every((t) => rt().recipients.some((x) => x.id === t && x.kind === 'team')))
+    )
+      return fail('teams must list existing team ids')
+    if (r.kind === 'team') {
+      delete r.role
+      delete r.teams
     }
     const all = rt().recipients
-    const exists = all.some((x) => x.id === r.id)
+    const previous = all.find((x) => x.id === r.id)
+    assertCanEditRecipient(me(req, body), r, previous)
+    const exists = Boolean(previous)
     saveRecipients(exists ? all.map((x) => (x.id === r.id ? r : x)) : [...all, r])
-    await audit(actorOf(req, body), exists ? 'recipient.updated' : 'recipient.created', r.id, JSON.stringify({ prefs: r.prefs, working_hours: h }))
+    await audit(
+      actorOf(req, body),
+      exists ? 'recipient.updated' : 'recipient.created',
+      r.id,
+      JSON.stringify({ prefs: r.prefs, working_hours: h, role: r.role, teams: r.teams })
+    )
     return json({ ok: true })
   })
 }
