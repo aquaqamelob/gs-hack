@@ -1,159 +1,126 @@
-// Chaos test: does delivery survive a provider outage under load?   bun run chaos
-//   bun run chaos --rate 50 --duration 60              # docker compose stack (stops/starts the mock-gateway container)
-//   bun run chaos --outage http                        # local stack without Docker: the gateway's /chaos switch
-//
-// Open-model load at a fixed rate; every event is its own alert notified by SMS + UI.
-//   t=15 s  the SMS gateway goes down (docker compose stop mock-gateway)
-//   t=35 s  it comes back (docker compose start mock-gateway)
-// After the outbox drains, for every alert created in the run:
-//   lost       = events without an alert + deliveries not `sent` + SMS the gateway never recorded
-//   duplicates = SMS idempotency keys the gateway recorded more than once
-// Prints `lost=0 duplicates=0` or fails with details. Needs DATABASE_URL (default: the compose Postgres on :5432).
-import { mkdirSync, writeFileSync } from 'node:fs'
-import postgres from 'postgres'
-import { args, BASE, deleteRule, openLoad, putRule, sleep, waitForDrain } from './lib/load'
-
-const RATE = Number(args.rate ?? 50)
-const DURATION = Number(args.duration ?? 60)
-const DOWN_AT = Number(args['down-at'] ?? 15)
-const UP_AT = Number(args['up-at'] ?? 35)
-const OUTAGE = (args.outage ?? 'docker') as 'docker' | 'http'
-const GW = (process.env.GATEWAY_URL ?? 'http://localhost:4010').replace(/\/$/, '')
-const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/ctrl'
+// Proof of delivery under failure. Run it through scripts/chaos.sh, which also kills an app replica mid-run.
+// Sends events at a constant rate, takes the SMS gateway down for part of the run, then counts what the gateway received.
+//   lost       = events accepted with 202 whose SMS never reached the gateway
+//   duplicates = events whose SMS the gateway delivered more than once
+const args = Object.fromEntries(
+  process.argv.slice(2).reduce<[string, string][]>((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1] ?? '']] : acc), [])
+)
+const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
+const GW = process.env.GATEWAY_URL ?? 'http://localhost:4010'
+const RATE = Number(args.rate ?? 100)
+const DURATION = Number(args.duration ?? 30)
+const TOTAL = Math.round(RATE * DURATION)
+const RULE_ID = 'chaos-e2e'
 const run = Date.now().toString(36)
-const RULE_ID = `chaos-${run}`
+const admin = { 'content-type': 'application/json', 'x-actor': 'admin' }
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`)
+// The gateway keeps the last 5000 messages, and every one of them has to be counted.
+if (TOTAL > 4500) throw new Error('rate × duration must stay under 4500')
 
-async function gateway(up: boolean) {
-  if (OUTAGE === 'http') {
-    await fetch(`${GW}/chaos`, { method: 'POST', body: JSON.stringify({ down: !up }) })
-    return
+const chaos = (down: boolean) => fetch(`${GW}/chaos`, { method: 'POST', body: JSON.stringify({ down }) })
+
+const accepted = new Set<number>()
+let clientRetries = 0
+let rejected = 0
+
+/** Retries like a real producer: a request cut off by a dying replica is unacknowledged, so it is sent again. */
+async function send(seq: number) {
+  const body = JSON.stringify({ type: 'CHAOS', run, seq, service: 'chaos', severity: 'ERROR', environment: 'perf', error: { code: 'SYNTHETIC', message: 'chaos' } })
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const res = await fetch(`${BASE}/ingest/chaos`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+      await res.arrayBuffer()
+      if (res.status === 202) {
+        accepted.add(seq)
+        return
+      }
+    } catch {
+      /* connection cut: retry below */
+    }
+    clientRetries++
+    await sleep(200 * 2 ** attempt)
   }
-  // Async spawn: a blocking call would stall the load generator for the seconds docker takes.
-  const p = Bun.spawn(['docker', 'compose', up ? 'start' : 'stop', 'mock-gateway'], {
-    stdout: 'ignore',
-    stderr: 'pipe',
-  })
-  if ((await p.exited) !== 0)
-    throw new Error(`docker compose ${up ? 'start' : 'stop'} failed: ${await new Response(p.stderr).text()}`)
+  rejected++
 }
+
+async function smsPerEvent() {
+  const messages = (await (await fetch(`${GW}/messages?limit=5000`)).json()) as { channel: string; text: string }[]
+  const counts = new Map<number, number>()
+  const tag = new RegExp(`Chaos ${run} (\\d+)`)
+  for (const m of messages) {
+    const seq = m.channel === 'sms' ? m.text.match(tag)?.[1] : undefined
+    if (seq) counts.set(Number(seq), (counts.get(Number(seq)) ?? 0) + 1)
+  }
+  return counts
+}
+
+const stats = async (since: number) => (await fetch(`${BASE}/api/system?only=stats&since=${since}`)).json() as Promise<any>
+const gatewayStats = async () => (await fetch(`${GW}/stats`)).json() as Promise<{ duplicatesRejected: number }>
 
 async function main() {
-  log(`Chaos → ${BASE}  rate=${RATE}/s  duration=${DURATION}s  gateway down ${DOWN_AT}–${UP_AT} s via ${OUTAGE}`)
-  await putRule({
-    id: RULE_ID,
-    name: `Chaos test ${run} (temporary)`,
-    team: 'team-settlements',
-    when: {
-      all: [
-        { field: 'type', op: 'eq', value: 'CHAOS' },
-        { field: 'run', op: 'eq', value: run },
-      ],
-    },
-    notify: [{ to: 'team-settlements', channels: ['sms', 'ui'] }],
-    present: { title: 'Chaos {{seq}}' },
-    group_by: ['seq'],
-    group_wait: '0s',
-  })
-
-  const faults: Promise<void>[] = []
-  const since = Date.now()
-  const load = await openLoad({
-    rate: RATE,
-    durationSec: DURATION,
-    source: 'chaos',
-    event: (seq) => ({
-      type: 'CHAOS',
-      run,
-      seq: `${run}-${seq}`,
-      service: 'chaos',
-      severity: 'ERROR',
-      environment: 'perf',
+  const res = await fetch(`${BASE}/api/rules`, {
+    method: 'PUT',
+    headers: admin,
+    body: JSON.stringify({
+      rule: {
+        id: RULE_ID,
+        name: 'Chaos test (temporary)',
+        team: 'team-platform',
+        when: { all: [{ field: 'type', op: 'eq', value: 'CHAOS' }] },
+        notify: [{ to: 'piotr', channels: ['sms'] }],
+        present: { title: `Chaos ${run} {{seq}}`, severity: 'error' },
+        group_by: ['seq'],
+        group_wait: '0s',
+        group_interval: '1h',
+        dedup_window: '1h',
+      },
     }),
-    onSecond: (t) => {
-      if (t === DOWN_AT) faults.push(gateway(false).then(() => log('SMS gateway DOWN')))
-      if (t === UP_AT) faults.push(gateway(true).then(() => log('SMS gateway UP')))
-    },
   })
-  await Promise.all(faults)
-  log(
-    `load done: ${load.sent} events, ${load.httpErrors} HTTP errors, ${load.achievedRate} msg/s; waiting for the outbox to drain`
-  )
-  const drained = await waitForDrain(since, 300_000)
+  if (!res.ok) throw new Error(`Cannot create chaos rule: ${await res.text()}`)
+  await sleep(500)
 
-  const sql = postgres(DATABASE_URL, { max: 2 })
-  const [{ alerts }] = await sql`select count(*)::int as alerts from alerts where rule_id = ${RULE_ID}`
-  const rows = await sql<{ key: string; channel: string; status: string; attempts: number }[]>`
-    select d.idempotency_key as key, d.channel, d.status, d.attempts
-    from deliveries d join alerts a on a.id = d.alert_id
-    where a.rule_id = ${RULE_ID}`
-  await sql.end()
-
-  const notSent = rows.filter((r) => r.status !== 'sent')
-  const sms = rows.filter((r) => r.channel === 'sms')
-  const lookup: Record<string, { recorded: number; receipts: number }> = {}
-  for (let i = 0; i < sms.length; i += 1000) {
-    const res = await fetch(`${GW}/lookup`, {
-      method: 'POST',
-      body: JSON.stringify({ keys: sms.slice(i, i + 1000).map((r) => r.key) }),
-    })
-    Object.assign(lookup, await res.json())
+  const since = Date.now()
+  const rejectedBefore = (await gatewayStats()).duplicatesRejected
+  const start = performance.now()
+  const pending: Promise<void>[] = []
+  setTimeout(() => (console.log('t+%ds  SMS gateway DOWN', Math.round(DURATION * 0.2)), void chaos(true)), DURATION * 200)
+  setTimeout(() => (console.log('t+%ds  SMS gateway UP', Math.round(DURATION * 0.5)), void chaos(false)), DURATION * 500)
+  for (let sent = 0; sent < TOTAL; ) {
+    const due = Math.min(TOTAL, Math.floor(((performance.now() - start) / 1000) * RATE))
+    while (sent < due) pending.push(send(++sent))
+    await sleep(2)
   }
-  const missingAtGateway = sms.filter((r) => r.status === 'sent' && !lookup[r.key]?.recorded)
-  const duplicated = sms.filter((r) => (lookup[r.key]?.recorded ?? 0) > 1)
-  const retransmits = sms.reduce((n, r) => n + Math.max(0, (lookup[r.key]?.receipts ?? 0) - 1), 0)
-  const eventsWithoutAlert = Math.max(0, load.sent - alerts)
-  const lost = eventsWithoutAlert + notSent.length + missingAtGateway.length
-  const duplicates = duplicated.length
+  await Promise.all(pending)
+  await chaos(false)
 
-  const result = {
-    at: new Date().toISOString(),
-    base: BASE,
-    rate: RATE,
-    durationSec: DURATION,
-    outage: { mode: OUTAGE, downAtSec: DOWN_AT, upAtSec: UP_AT },
-    load,
-    alerts,
-    deliveries: rows.length,
-    byStatus: Object.fromEntries(
-      ['sent', 'pending', 'dead'].map((s) => [s, rows.filter((r) => r.status === s).length])
-    ),
-    smsDeliveries: sms.length,
-    smsRetried: sms.filter((r) => r.attempts > 1).length,
-    retransmitsAbsorbedByIdempotencyKey: retransmits,
-    endToEnd: drained.endToEnd,
-    lost,
-    duplicates,
-    details: {
-      eventsWithoutAlert,
-      notSent: notSent.slice(0, 20),
-      missingAtGateway: missingAtGateway.slice(0, 20).map((r) => r.key),
-      duplicated: duplicated.slice(0, 20).map((r) => r.key),
-    },
-  }
-  mkdirSync('results', { recursive: true })
-  const file = `results/chaos-${RATE}rps-${result.at.replace(/[:.]/g, '-')}.json`
-  writeFileSync(file, JSON.stringify(result, null, 2))
+  // A replica killed mid-send leaves leased rows; they are retried once the 30 s lease expires.
+  let m: any
+  let counts = new Map<number, number>()
+  const deadline = Date.now() + 150_000
+  do {
+    await sleep(1000)
+    m = await stats(since)
+    counts = await smsPerEvent()
+  } while ((m.pending > 0 || [...accepted].some((s) => !counts.has(s))) && Date.now() < deadline)
+  await fetch(`${BASE}/api/rules?id=${RULE_ID}`, { method: 'DELETE', headers: { 'x-actor': 'admin' } })
 
+  const lost = [...accepted].filter((s) => !counts.has(s)).length
+  const duplicates = [...counts.values()].filter((n) => n > 1).length
+  const providerRetries = (await gatewayStats()).duplicatesRejected - rejectedBefore
+  const sms = m.endToEnd.sms
   console.log(`
-${alerts} alerts, ${rows.length} deliveries (${sms.length} SMS, ${result.smsRetried} retried during the outage)
-${retransmits} resends absorbed by the idempotency key
-lost=${lost} duplicates=${duplicates}
-Saved ${file}`)
-  if (lost || duplicates) {
-    console.error('FAILED', JSON.stringify(result.details, null, 2))
-    process.exitCode = 1
-  }
+sent=${TOTAL} accepted=${accepted.size} refused_after_retries=${rejected} client_retries=${clientRetries}
+sms_delivered=${counts.size} lost=${lost} duplicates=${duplicates} repeat_sends_stopped_by_idempotency_key=${providerRetries}
+pending=${m.pending} dead=${m.dead}
+ingest → SMS, including the outage: p50 ${sms.p50} ms  p99 ${sms.p99} ms  max ${sms.max} ms`)
+  const ok = lost === 0 && duplicates === 0 && rejected === 0 && m.pending === 0 && m.dead === 0
+  console.log(ok ? '\nPASS' : '\nFAIL')
+  process.exit(ok ? 0 : 1)
 }
 
-main()
-  .catch((e) => {
-    console.error(e)
-    process.exitCode = 1
-  })
-  .finally(async () => {
-    await gateway(true).catch(() => {})
-    await sleep(100)
-    await deleteRule(RULE_ID)
-  })
+main().catch(async (e) => {
+  console.error(e)
+  await chaos(false).catch(() => {})
+  process.exit(1)
+})

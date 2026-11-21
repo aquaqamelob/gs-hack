@@ -58,6 +58,7 @@ services:
       SMTP_URL: smtp://mailhog:1025
       MAILHOG_UI_URL: http://localhost:8025
       PUBLIC_URL: http://localhost:3000
+      INGEST_BASE_URL: http://lb
       WORKFLOW_API: http://workflow-api
       ESCALATION_API: http://escalation-api
       ACTION_ALLOWED_HOSTS: counterparty-service,workflow-api,escalation-api

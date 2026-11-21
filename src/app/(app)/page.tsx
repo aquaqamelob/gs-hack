@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 // ---------------------------------------------------------------- demo events
 
 const SCENARIOS = [
-  { id: 'workflow', label: 'Settlement workflow failed', hint: 'Appendix A #1, via the broker' },
+  { id: 'workflow', label: 'Settlement workflow failed', hint: 'Appendix A #1, via the broker when configured' },
   { id: 'metric', label: 'payments-api error rate', hint: 'Appendix A #2, Alertmanager webhook' },
   { id: 'trade', label: 'Rejected EUR 25M trade', hint: 'Appendix A #3, different envelope' },
   { id: 'pricing-log', label: 'Pricing WARN log lines', hint: '6 log lines, grouped per instrument', count: 6 },
@@ -23,12 +23,13 @@ const SCENARIOS = [
   { id: 'noise', label: '10,000 mixed events', hint: 'shows noise reduction', count: 10000 },
 ] as const
 
-type DemoResult = { via?: string; sent?: number; accepted?: number; matchedRules?: string[]; unassigned?: number }
+type DemoResult = { via?: 'kafka' | 'direct'; target?: string; sent?: number; accepted?: number; matchedRules?: string[]; unassigned?: number }
 
 function describeResult(r: DemoResult) {
   const n = r.sent ?? r.accepted ?? 0
-  const rules = r.matchedRules?.length ? `matched ${r.matchedRules.join(', ')}` : r.via?.startsWith('kafka') ? 'consumer will pick it up' : 'no rule matched'
-  return `${n} event${n === 1 ? '' : 's'} via ${r.via ?? 'webhook'} → ${rules}${r.unassigned ? ` · ${r.unassigned} to Unassigned` : ''}`
+  const rules = r.matchedRules?.length ? `matched ${r.matchedRules.join(', ')}` : r.via === 'kafka' ? 'consumer will pick it up' : 'no rule matched'
+  const path = r.via === 'kafka' ? `kafka (topic ${r.target})` : `direct (${r.target})`
+  return `${n} event${n === 1 ? '' : 's'} via ${path} → ${rules}${r.unassigned ? ` · ${r.unassigned} to Unassigned` : ''}`
 }
 
 function DemoPanel() {
@@ -52,7 +53,7 @@ function DemoPanel() {
     setBusy('custom')
     try {
       const r = await api<DemoResult & { schemas: { name: string; status: string }[] }>('/api/ingest/webhook', { body: JSON.parse(custom) })
-      setMsg(`${describeResult({ ...r, via: 'webhook' })} · schema ${r.schemas.map((s) => `"${s.name}" (${s.status})`).join(', ')}`)
+      setMsg(`${describeResult({ ...r, via: 'direct', target: 'POST /ingest/webhook' })} · schema ${r.schemas.map((s) => `"${s.name}" (${s.status})`).join(', ')}`)
     } catch (e) {
       setMsg(`Error: ${(e as Error).message}`)
     } finally {

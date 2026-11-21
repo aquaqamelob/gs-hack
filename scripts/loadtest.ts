@@ -3,25 +3,46 @@
 //   bun run loadtest --rate 1000 --duration 30
 //   bun run loadtest --mode noise         # realistic mix with duplicates: shows noise reduction
 //   BASE_URL=http://host:3000 bun run loadtest
+//   bun run loadtest --channels ui        # leave the SMTP sink out, to measure CTRL's own capacity
+//   scripts/scale-curve.sh                # msg/s and p50/p99 at 1, 2 and 4 replicas, on an isolated stack
 //
 // Requests are fired on a fixed schedule whether or not earlier ones have returned, and HTTP latency is measured
 // from the *scheduled* send time. End-to-end latency (ingest → channel adapter accepted the message) is measured
-// inside the service per delivery (Postgres timestamps) and read from /api/system after the queue drains.
-// The load generator runs on the same machine as the service unless BASE_URL points elsewhere: say so with the numbers.
+// inside the service per delivery and read from /api/system after the queue drains.
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { BASE, args, deleteRule, openLoad, putRule, waitForDrain } from './lib/load'
 
+const args = Object.fromEntries(
+  process.argv
+    .slice(2)
+    .reduce<
+      [string, string][]
+    >((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1] ?? '']] : acc), [])
+)
+const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const RATE = Number(args.rate ?? 300)
 const DURATION = Number(args.duration ?? 20)
 const MODE = (args.mode ?? 'e2e') as 'e2e' | 'noise'
 const RULE_ID = 'loadtest-e2e'
-const run = Date.now().toString(36)
+const CHANNELS = (args.channels ?? 'ui,email').split(',')
 
-function event(seq: number) {
+const post = (path: string, body: unknown, method = 'POST') =>
+  fetch(BASE + path, {
+    method,
+    headers: { 'content-type': 'application/json', 'x-actor': 'admin' },
+    body: JSON.stringify(body),
+  })
+
+const pct = (xs: number[], p: number) =>
+  xs.length ? xs[Math.min(xs.length - 1, Math.ceil((p / 100) * xs.length) - 1)] : 0
+const r1 = (n: number) => Math.round(n * 10) / 10
+
+let seq = 0
+function event() {
+  seq++
   if (MODE === 'e2e') {
     return {
       type: 'LOADTEST',
-      seq: `${run}-${seq}`,
+      seq,
       service: 'loadgen',
       severity: 'ERROR',
       environment: 'perf',
@@ -72,53 +93,121 @@ function event(seq: number) {
 async function main() {
   console.log(`Load test → ${BASE}  mode=${MODE}  rate=${RATE}/s  duration=${DURATION}s  (open model)`)
   if (MODE === 'e2e') {
-    // One alert per event (group_by seq, no group_wait), notified on email + UI: the full path for every event.
-    await putRule({
-      id: RULE_ID,
-      name: 'Load test (temporary)',
-      team: 'team-settlements',
-      when: { field: 'type', op: 'eq', value: 'LOADTEST' },
-      notify: [{ to: 'team-settlements', channels: ['ui', 'email'] }],
-      present: { title: 'Load test {{seq}}' },
-      group_by: ['seq'],
-      group_wait: '0s',
-    })
+    const res = await post(
+      '/api/rules',
+      {
+        rule: {
+          id: RULE_ID,
+          name: 'Load test (temporary)',
+          team: 'team-settlements',
+          when: { all: [{ field: 'type', op: 'eq', value: 'LOADTEST' }] },
+          notify: [{ to: 'team-settlements', channels: CHANNELS }],
+          present: { title: 'Load test {{seq}}' },
+          group_by: ['seq'],
+          group_wait: '0s',
+          group_interval: '1h',
+          dedup_window: '1h',
+        },
+      },
+      'PUT'
+    )
+    if (!res.ok) throw new Error(`Cannot create load-test rule: ${await res.text()}`)
   }
   const since = Date.now()
-  const load = await openLoad({ rate: RATE, durationSec: DURATION, source: 'loadtest', event })
-  const m = await waitForDrain(since)
-  if (MODE === 'e2e') await deleteRule(RULE_ID)
 
+  const total = Math.round(RATE * DURATION)
+  const latencies: number[] = []
+  let errors = 0
+  let inflight = 0
+  let maxInflight = 0
+  const start = performance.now()
+  const pending: Promise<void>[] = []
+
+  await new Promise<void>((resolve) => {
+    let sent = 0
+    const tick = () => {
+      const elapsed = (performance.now() - start) / 1000
+      const due = Math.min(total, Math.floor(elapsed * RATE))
+      while (sent < due) {
+        const scheduledAt = start + (sent / RATE) * 1000
+        sent++
+        inflight++
+        maxInflight = Math.max(maxInflight, inflight)
+        pending.push(
+          fetch(`${BASE}/api/ingest/loadtest`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(event()),
+          })
+            .then(async (r) => {
+              await r.arrayBuffer()
+              if (!r.ok) errors++
+            })
+            .catch(() => void errors++)
+            .finally(() => {
+              inflight--
+              latencies.push(performance.now() - scheduledAt)
+            })
+        )
+      }
+      if (sent >= total) return resolve()
+      setTimeout(tick, 2)
+    }
+    tick()
+  })
+  await Promise.all(pending)
+  const wall = (performance.now() - start) / 1000
+
+  let m: any
+  for (let i = 0; i < 240; i++) {
+    m = await (await fetch(`${BASE}/api/system?only=stats&since=${since}`)).json()
+    if (m.pending === 0) break
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  if (MODE === 'e2e') await fetch(`${BASE}/api/rules?id=${RULE_ID}`, { method: 'DELETE', headers: { 'x-actor': 'admin' } })
+
+  latencies.sort((a, b) => a - b)
   const result = {
     at: new Date().toISOString(),
     mode: MODE,
-    base: BASE,
     targetRate: RATE,
     durationSec: DURATION,
-    ...load,
+    sent: total,
+    httpErrors: errors,
+    achievedRate: r1(total / wall),
+    maxInflight,
+    http: {
+      p50: r1(pct(latencies, 50)),
+      p95: r1(pct(latencies, 95)),
+      p99: r1(pct(latencies, 99)),
+      max: r1(latencies[latencies.length - 1] ?? 0),
+    },
     server: {
-      events: m.events,
-      matched: m.matched,
+      stored: m.events,
       alertsCreated: m.alertsCreated,
       noiseReduction: m.noiseReduction,
+      delivered: m.endToEnd.all.count,
       pending: m.pending,
       dead: m.dead,
-      retried: m.retried,
       endToEnd: m.endToEnd,
       instance: m.instance,
     },
   }
-  const e = m.endToEnd.all
+
   console.log(`
-Sent ${load.sent} events in ${load.wallSec} s → achieved ${load.achievedRate} msg/s (target ${RATE}), ${load.httpErrors} HTTP errors, max ${load.maxInflight} in flight
-HTTP accept latency (from scheduled send):  p50 ${load.http.p50} ms   p95 ${load.http.p95} ms   p99 ${load.http.p99} ms   max ${load.http.max} ms
-Ingest → delivery (server-measured, ${e.count} first notifications):  p50 ${e.p50} ms   p95 ${e.p95} ms   p99 ${e.p99} ms   max ${e.max} ms
-Events ${m.events} (${m.matched} matched) → alerts ${m.alertsCreated} (${m.noiseReduction}:1) · pending ${m.pending} · dead ${m.dead} · retried ${m.retried}`)
+Sent ${total} events in ${r1(wall)} s → achieved ${result.achievedRate} msg/s (target ${RATE}), ${errors} HTTP errors, max ${maxInflight} in flight
+HTTP accept latency (from scheduled send):  p50 ${result.http.p50} ms   p95 ${result.http.p95} ms   p99 ${result.http.p99} ms   max ${result.http.max} ms
+Ingest → delivery (server-measured, ${m.endToEnd.all.count} deliveries):  p50 ${m.endToEnd.all.p50} ms   p95 ${m.endToEnd.all.p95} ms   p99 ${m.endToEnd.all.p99} ms   max ${m.endToEnd.all.max} ms
+Events stored ${m.events} of ${total} → alerts ${m.alertsCreated} (${m.noiseReduction}:1) · delivered ${m.endToEnd.all.count} · pending ${m.pending} · dead ${m.dead}`)
 
   mkdirSync('results', { recursive: true })
   const file = `results/loadtest-${MODE}-${RATE}rps-${result.at.replace(/[:.]/g, '-')}.json`
   writeFileSync(file, JSON.stringify(result, null, 2))
   console.log(`\nSaved ${file}`)
+  if (args.row) {
+    const e2e = m.endToEnd.all
+    writeFileSync(args.row, [RATE, result.achievedRate, errors, total - m.events, result.http.p50, result.http.p99, e2e.p50, e2e.p99, m.pending].join('\t'))
+  }
 }
 
 main().catch((e) => {

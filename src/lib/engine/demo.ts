@@ -1,6 +1,6 @@
+import { ingestAuthHeaders } from './api'
 import { produce } from './kafka'
-import { ingest } from './pipeline'
-import { parseLogLine } from './schema'
+import type { IngestResult } from './pipeline'
 
 const pad = (n: number, w = 5) => String(n).padStart(w, '0')
 const today = () => new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -49,14 +49,49 @@ export const SAMPLES = {
 export const SCENARIOS = ['workflow', 'burst', 'metric', 'metric-resolved', 'trade', 'pricing-log', 'unknown', 'noise'] as const
 export type Scenario = (typeof SCENARIOS)[number]
 
-/** Broker events go through Redpanda when it is configured, so the demo exercises the real consumer. */
-async function toBroker(topic: string, events: unknown[]) {
+export type DemoResult = { via: 'kafka' | 'direct'; target: string; sent: number } & Partial<IngestResult>
+
+const INGEST_BASE = () => process.env.INGEST_BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 3000}`
+const HTTP_CHUNK = 500
+
+/** A real request through the load balancer: same auth, parsing and limits as any external producer. */
+async function postIngest(source: string, body: string, contentType: string): Promise<IngestResult> {
+  const res = await fetch(`${INGEST_BASE()}/ingest/${source}`, {
+    method: 'POST',
+    headers: { 'content-type': contentType, ...ingestAuthHeaders(source, body) },
+    body,
+  })
+  const data = await res.json()
+  if (res.status !== 202) throw new Error(`POST /ingest/${source} returned ${res.status}: ${data.error ?? ''}`)
+  return data as IngestResult
+}
+
+async function viaHttp(source: string, events: unknown[], contentType = 'application/json'): Promise<DemoResult> {
+  const results: IngestResult[] = []
+  for (let i = 0; i < events.length; i += HTTP_CHUNK) {
+    const chunk = events.slice(i, i + HTTP_CHUNK)
+    const body = contentType === 'text/plain' ? chunk.join('\n') : JSON.stringify(chunk)
+    results.push(await postIngest(source, body, contentType))
+  }
+  return {
+    via: 'direct',
+    target: `POST /ingest/${source}`,
+    sent: results.reduce((n, r) => n + r.accepted, 0),
+    accepted: results.reduce((n, r) => n + r.accepted, 0),
+    unassigned: results.reduce((n, r) => n + r.unassigned, 0),
+    schemas: results.flatMap((r) => r.schemas),
+    matchedRules: [...new Set(results.flatMap((r) => r.matchedRules))],
+    alertIds: [...new Set(results.flatMap((r) => r.alertIds))],
+  }
+}
+
+/** Broker events go through Redpanda when it is configured. Without it they take the HTTP path, and the result says so. */
+async function toBroker(topic: string, events: unknown[], contentType?: string): Promise<DemoResult> {
   if (process.env.KAFKA_BROKERS) {
     await produce(topic, events)
-    return { via: `kafka:${topic}`, sent: events.length }
+    return { via: 'kafka', target: topic, sent: events.length }
   }
-  const r = await ingest(events, topic)
-  return { via: `direct:${topic}`, sent: r.accepted, matchedRules: r.matchedRules, alertIds: r.alertIds }
+  return viaHttp(topic, events, contentType)
 }
 
 export async function runScenario(scenario: Scenario, count = 1) {
@@ -72,15 +107,14 @@ export async function runScenario(scenario: Scenario, count = 1) {
     case 'pricing-log': {
       const instruments = ['EURUSD', 'USDJPY', 'GBPUSD']
       const lines = Array.from({ length: count }, (_, i) => SAMPLES.logLine(instruments[i % 3], 1000 + Math.floor(Math.random() * 900), 1 + (i % 4)))
-      if (process.env.KAFKA_BROKERS) return toBroker('logs', lines)
-      return toBroker('logs', lines.map(parseLogLine))
+      return toBroker('logs', lines, 'text/plain')
     }
     case 'metric':
-      return { via: 'webhook:alertmanager', ...(await ingest(SAMPLES.metric('firing'), 'alertmanager')) }
+      return viaHttp('alertmanager', [SAMPLES.metric('firing')])
     case 'metric-resolved':
-      return { via: 'webhook:alertmanager', ...(await ingest(SAMPLES.metric('resolved'), 'alertmanager')) }
+      return viaHttp('alertmanager', [SAMPLES.metric('resolved')])
     case 'unknown':
-      return { via: 'webhook:partner', ...(await ingest(SAMPLES.unknown(), 'partner')) }
+      return viaHttp('partner', [SAMPLES.unknown()])
     case 'noise': {
       const events: unknown[] = []
       for (let i = 0; i < count; i++) {

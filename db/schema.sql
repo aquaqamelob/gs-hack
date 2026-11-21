@@ -115,6 +115,14 @@ CREATE INDEX IF NOT EXISTS audit_at ON audit_log (at DESC);
 DROP TABLE IF EXISTS ai_proposals;
 ALTER TABLE schemas DROP COLUMN IF EXISTS llm;
 
+-- Rules that failed to evaluate, shown in the console. Cleared when the rule is saved.
+CREATE TABLE IF NOT EXISTS rule_errors (
+  rule_id    text PRIMARY KEY,
+  count      bigint      NOT NULL,
+  last_error text        NOT NULL,
+  last_at    timestamptz NOT NULL DEFAULT now()
+);
+
 -- Failed SMS/email reply attempts per normalised sender. Shared by every instance; the limit is a count over a window.
 CREATE TABLE IF NOT EXISTS reply_failures (
   id     bigserial PRIMARY KEY,

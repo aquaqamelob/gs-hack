@@ -91,5 +91,6 @@ export function prometheus() {
     lines.push(`ctrl_${key} ${value}`)
   }
   if (!seen.has('unmapped_events_total')) lines.push('# TYPE ctrl_unmapped_events_total counter', 'ctrl_unmapped_events_total 0')
+  if (!seen.has('rule_errors_total')) lines.push('# TYPE ctrl_rule_errors_total counter', 'ctrl_rule_errors_total 0')
   return lines.join('\n') + '\n'
 }

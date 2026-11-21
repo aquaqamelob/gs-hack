@@ -44,7 +44,9 @@ export async function handle(fn: () => Promise<Response>) {
 const envKey = (source: string) => source.toUpperCase().replace(/[^A-Z0-9]/g, '_')
 
 function safeEqual(a: string, b: string) {
-  return a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
+  const x = Buffer.from(a)
+  const y = Buffer.from(b)
+  return x.length === y.length && timingSafeEqual(x, y)
 }
 
 /**
@@ -63,4 +65,12 @@ export function checkIngestAuth(req: Request, source: string, rawBody: string): 
     if (safeEqual(sig, expected)) return null
   }
   return 'Unauthorized: send "Authorization: Bearer <token>" or "X-Signature: sha256=<hmac of body>"'
+}
+
+/** Credentials a real producer of this source would send, for the demo's HTTP calls. */
+export function ingestAuthHeaders(source: string, rawBody: string): Record<string, string> {
+  const token = process.env[`INGEST_TOKEN_${envKey(source)}`] ?? process.env.INGEST_TOKEN
+  if (token) return { authorization: `Bearer ${token}` }
+  const secret = process.env[`INGEST_HMAC_${envKey(source)}`] ?? process.env.INGEST_HMAC_SECRET
+  return secret ? { 'x-signature': `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}` } : {}
 }

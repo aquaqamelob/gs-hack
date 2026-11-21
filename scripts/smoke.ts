@@ -97,13 +97,19 @@ check(
   a.deliveries.map((d: any) => `${d.channel}:${d.status}/${d.attempts}`).join(' ')
 )
 const gw = await (await fetch(`${GW}/stats`)).json()
-check('gateway saw no duplicate messages (idempotency key)', gw.total - (gw.byChannel.webhook ?? 0) - (gw.byChannel.email ?? 0) <= gw.uniqueKeys, JSON.stringify(gw))
+check('gateway saw no duplicate messages (idempotency key)', gw.total - (gw.byChannel.webhook ?? 0) - (gw.byChannel.email ?? 0) - (gw.byChannel.inbound ?? 0) <= gw.uniqueKeys, JSON.stringify(gw))
 check('runbook steps rendered with the workflow id', JSON.stringify(a.steps).includes(wfEvent.workflowId), a.steps.map((s: any) => s.text).join(' | '))
 
 // 3. Dedup: 500 identical events become one alert.
+// With Kafka the demo only produces to the topic, so wait for the consumer instead of expecting alert ids back.
+const listAlerts = async () => (await call('/api/alerts?limit=500')).alerts as any[]
+const countsBefore = new Map((await listAlerts()).map((x) => [x.id, x.count]))
 const burst = await call('/api/demo', { scenario: 'burst', count: 500 })
-const burstAlert = await alertOf(burst.result.alertIds[0])
-check('500 identical events fold into one alert', burstAlert.count >= 500 && burst.result.alertIds.length === 1, `count=${burstAlert.count}`)
+check('demo reports the path it used', burst.result.via === 'kafka' || burst.result.via === 'direct', burst.result.via)
+const grown = (xs: any[]) => xs.filter((x) => x.ruleId === 'settlements-workflow-failed' && x.count > (countsBefore.get(x.id) ?? 0))
+const grew = (x: any) => x.count - (countsBefore.get(x.id) ?? 0)
+const burstAlerts = grown(await until(listAlerts, (xs) => grown(xs).reduce((n, x) => n + grew(x), 0) >= 500, 20_000))
+check('500 identical events fold into one alert', burstAlerts.length === 1 && grew(burstAlerts[0]) === 500, burstAlerts.map((x) => `+${grew(x)}`).join(','))
 
 // 4. Runbook steps as buttons, and approval by SMS reply.
 const s2 = (await call(`/api/alerts/${id}/steps/s2`, { op: 'run' })).alert.steps[1]
@@ -144,9 +150,11 @@ ma = await alertOf(m.result.alertIds[0])
 check('Alertmanager "resolved" auto-closes the alert', ma.status === 'resolved', ma.resolvedBy)
 
 // 6. Rule on raw fields with a template title.
-const t = await call('/api/demo', { scenario: 'trade' })
-const ta = await alertOf(t.result.alertIds[0])
-check('trade title rendered from raw payload fields', ta.title === 'Rejected EUR 25,000,000 — LIMIT_BREACH', ta.title)
+const tradeAt = Date.now()
+await call('/api/demo', { scenario: 'trade' })
+const isTrade = (x: any) => x.ruleId !== '__unassigned' && x.source === 'events' && x.schemaName?.includes('trade') && x.lastSeen >= tradeAt - 1000
+const ta = (await until(listAlerts, (xs) => xs.some(isTrade), 15_000)).find(isTrade)
+check('trade title rendered from raw payload fields', ta?.title === 'Rejected EUR 25,000,000 — LIMIT_BREACH', ta?.title)
 
 // 7. group_wait: log lines grouped per instrument, notified once after the wait.
 const instruments = ['EUR', 'JPY', 'GBP'].map((c) => `${c}-${run}`)
@@ -171,7 +179,11 @@ const u = await call('/api/ingest/partner', { [`probe_${run}`]: 'x', lvl: 'P1', 
 check('unmapped schema goes to the Unassigned inbox', u.unassigned === 1 && u.schemas[0].status === 'needs-review', u.schemas[0]?.name)
 const ua = await alertOf(u.alertIds[0])
 check('default owner notified about the unassigned event', ua.team === 'unassigned' && ua.deliveries.some((d: any) => d.recipient === 'team-platform'))
-const metrics = await (await fetch(`${B}/metrics`)).text()
+// Counters are per instance and the LB picks one per request, so keep scraping until the instance that handled it answers.
+const metrics = await until(
+  async () => (await fetch(`${B}/metrics`)).text(),
+  (text) => /ctrl_unmapped_events_total [1-9]/.test(text)
+)
 check('unmapped_events_total exported', /ctrl_unmapped_events_total [1-9]/.test(metrics))
 
 // 9. Rule preview against recent events.
@@ -297,6 +309,34 @@ check(
 await call(`/api/alerts/${nextAlert.id}`, { op: 'resolve' })
 await send('DELETE', `/api/rules?id=${learnId}`)
 await send('POST', `/api/runbooks/${learnId}`, { op: 'delete' })
+
+// 15. Noise budget: the forecast must equal what the real grouping and outbox then send.
+const noiseType = `NOISE_${run}`
+const noiseRule = {
+  id: `smoke-noise-${run}`,
+  name: 'Smoke noise budget',
+  team: 'team-platform',
+  when: { field: 'type', op: 'eq', value: noiseType },
+  notify: [{ to: 'piotr', channels: ['sms'] }],
+  group_by: ['type'],
+  group_wait: '1s',
+  group_interval: '2s',
+}
+const asAdmin = { 'content-type': 'application/json', 'x-actor': 'admin' }
+await fetch(`${B}/api/rules`, { method: 'PUT', headers: asAdmin, body: JSON.stringify({ rule: noiseRule }) })
+await sleep(500)
+let noiseAlert = ''
+for (const wait of [0, 100, 3900, 4000]) {
+  await sleep(wait)
+  const r = await call('/ingest/webhook', { type: noiseType, service: 'noise', severity: 'ERROR' })
+  noiseAlert = r.alertIds[0]
+}
+await sleep(3500)
+const realSms = (await alertOf(noiseAlert)).deliveries.filter((d: any) => d.channel === 'sms').length
+const forecast = (await call('/api/rules/test', { rule: noiseRule })).budget
+const forecastSms = forecast.lines.find((l: any) => l.recipient === 'piotr' && l.channel === 'sms')?.count
+check('noise budget forecast equals real SMS sent', realSms === 3 && forecastSms === realSms, `forecast ${forecastSms}, real ${realSms}, from 4 events`)
+await fetch(`${B}/api/rules?id=${noiseRule.id}`, { method: 'DELETE', headers: asAdmin })
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
 process.exit(failures ? 1 : 0)

@@ -14,6 +14,7 @@ const seen = new Map<string, number>()
 const receipts = new Map<string, number>()
 let seq = 0
 let down = false
+let duplicatesRejected = 0
 
 // Optional append-only log so `docker compose stop/start` keeps history and idempotency (used by scripts/chaos.ts).
 const LOG = process.env.MOCK_LOG ?? ''
@@ -64,7 +65,7 @@ Bun.serve({
     if (path === '/stats') {
       const by: Record<string, number> = {}
       for (const m of messages) by[m.channel] = (by[m.channel] ?? 0) + 1
-      return json({ total: messages.length, uniqueKeys: seen.size, byChannel: by, down })
+      return json({ total: messages.length, uniqueKeys: seen.size, duplicatesRejected, byChannel: by, down })
     }
     // For the chaos test: per key, how many messages were recorded (should be 1) and how many POSTs arrived.
     if (path === '/lookup' && req.method === 'POST') {
@@ -101,7 +102,10 @@ Bun.serve({
       const body = (await req.json().catch(() => ({}))) as { to?: string; text?: string; key?: string }
       const key = req.headers.get('idempotency-key') ?? body.key ?? ''
       if (key) receipts.set(key, (receipts.get(key) ?? 0) + 1)
-      if (key && seen.has(key)) return json({ id: seen.get(key), duplicate: true })
+      if (key && seen.has(key)) {
+        duplicatesRejected++
+        return json({ id: seen.get(key), duplicate: true })
+      }
       const msg = record({ channel: path.slice(1), to: String(body.to ?? ''), text: String(body.text ?? ''), key })
       if (key) seen.set(key, msg.id)
       return json({ id: msg.id, duplicate: false })

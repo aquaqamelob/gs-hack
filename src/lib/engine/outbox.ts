@@ -1,4 +1,4 @@
-import { audit, publish } from './bus'
+import { audit, publishAlerts } from './bus'
 import { ADAPTERS, addressFor, channelsFor, findRecipient, formatFor } from './channels'
 import { db, ms, type Tx } from './db'
 import { count, rt } from './runtime'
@@ -89,8 +89,14 @@ export async function insertDeliveries(tx: Tx, rows: PlannedDelivery[]) {
   await tx`
     insert into deliveries ${tx(rows as never, 'idempotencyKey', 'alertId', 'recipient', 'address', 'channel', 'reason', 'subject', 'body', 'eventReceivedAt')}
     on conflict (idempotency_key) do nothing`
-  await tx`select pg_notify(${OUTBOX_CHANNEL}, '')`
   count('notifications_enqueued_total', rows.length)
+}
+
+/** Call after commit. Only a latency optimisation: every dispatcher also polls the outbox every 250 ms. */
+export async function wakeOutboxes() {
+  await db()`select set_config('synchronous_commit', 'off', true), pg_notify(${OUTBOX_CHANNEL}, '')`.catch((e) =>
+    console.error('[outbox] wake failed:', (e as Error).message)
+  )
 }
 
 // ---------------------------------------------------------------- dispatcher
@@ -184,7 +190,7 @@ async function complete(results: Result[]) {
     count('deliveries_dead_total')
     await audit('system', 'delivery.dead-letter', r.alertId, `${r.channel} to ${r.address}: ${r.error}`)
   }
-  for (const alertId of new Set(results.map((r) => r.alertId))) await publish({ type: 'alert', id: alertId })
+  await publishAlerts(new Set(results.map((r) => r.alertId)))
 }
 
 export async function requeueDelivery(id: number, actor: string) {
@@ -206,6 +212,7 @@ export async function scheduleTick(loadAlert: (row: never) => Alert) {
   if (scheduling) return
   scheduling = true
   try {
+    const notified = new Set<string>()
     await db().begin(async (tx) => {
       const due = await tx`
         select * from alerts where next_notify_at <= now()
@@ -223,9 +230,10 @@ export async function scheduleTick(loadAlert: (row: never) => Alert) {
         await tx`
           update alerts set notify_seq = ${alert.notifySeq}, notified_count = ${alert.count}, last_notified_at = now(), next_notify_at = null
           where id = ${alert.id}`
-        await publish({ type: 'alert', id: alert.id }, tx)
+        notified.add(alert.id)
       }
     })
+    if (notified.size) await Promise.all([wakeOutboxes(), publishAlerts(notified)])
   } catch (e) {
     console.error('[outbox] scheduler error', (e as Error).message)
   } finally {

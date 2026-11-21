@@ -1,5 +1,5 @@
 import nodemailer, { type Transporter } from 'nodemailer'
-import { publish } from './bus'
+import { publishPush } from './bus'
 import { rt } from './runtime'
 import type { Alert, Channel, Delivery, Recipient, Route, Severity } from './types'
 import { hhmmToMinutes, localMinutes } from './util'
@@ -55,7 +55,7 @@ const ui: ChannelAdapter = {
   label: 'Live UI',
   provider: () => 'server-sent events',
   async send(d) {
-    await publish({ type: 'push', id: d.alertId, to: d.recipient })
+    await publishPush(d.alertId, d.recipient)
   },
 }
 

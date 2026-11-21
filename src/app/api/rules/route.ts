@@ -2,7 +2,7 @@ import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
 import { assertCanEditRule, me } from '@/lib/engine/auth'
 import { audit } from '@/lib/engine/bus'
 import { ConfigError, configVersion, updateRules } from '@/lib/engine/config'
-import { db } from '@/lib/engine/db'
+import { db, ms } from '@/lib/engine/db'
 import { describeCondition, OP_LABELS, validateRule } from '@/lib/engine/rules'
 import { rt } from '@/lib/engine/runtime'
 import { allKeys } from '@/lib/engine/schema'
@@ -16,9 +16,15 @@ export async function GET(req: Request) {
     const fields = new Set<string>(['source', 'schema', ...allKeys()])
     const rows = await db()<{ fields: FieldInfo[] }[]>`select fields from schemas order by last_seen desc limit 100`
     for (const row of rows) for (const f of row.fields) fields.add(f.path)
+    const errors = new Map(
+      (await db()<{ ruleId: string; count: string; lastError: string; lastAt: Date }[]>`select * from rule_errors`).map((e) => [
+        e.ruleId,
+        { count: Number(e.count), message: e.lastError, at: ms(e.lastAt) },
+      ])
+    )
     return json({
       version: configVersion('rules'),
-      rules: r.rules.map((x) => ({ ...x, summary: describeCondition(x.when) })),
+      rules: r.rules.map((x) => ({ ...x, summary: describeCondition(x.when), evalError: errors.get(x.id) })),
       fields: [...fields],
       ops: OP_LABELS,
       recipients: r.recipients.map(({ id, name, kind }) => ({ id, name, kind })),
@@ -37,8 +43,9 @@ export async function PUT(req: Request) {
     if (err) return fail(err)
     const who = me(req, body)
     const replaceId = body.previousId ?? rule.id
-    const clean = JSON.parse(JSON.stringify(rule)) as Rule & { summary?: string }
+    const clean = JSON.parse(JSON.stringify(rule)) as Rule & { summary?: string; evalError?: unknown }
     delete clean.summary
+    delete clean.evalError
     // Conflict checks run on the rules as stored in Postgres now, under the row lock.
     const exists = await updateRules((rules) => {
       const previous = rules.find((x) => x.id === replaceId)
@@ -51,6 +58,7 @@ export async function PUT(req: Request) {
         result: Boolean(previous),
       }
     }, body.version, actorOf(req, body))
+    await db()`delete from rule_errors where rule_id in (${rule.id}, ${replaceId})`
     await audit(actorOf(req, body), exists ? 'rule.updated' : 'rule.created', rule.id, describeCondition(rule.when))
     return json({ ok: true, rule: clean, version: configVersion('rules') })
   })
@@ -68,6 +76,7 @@ export async function DELETE(req: Request) {
       assertCanEditRule(who, null, previous)
       return { rules: rules.filter((x) => x.id !== id) }
     }, params.get('version') ?? undefined, actorOf(req))
+    await db()`delete from rule_errors where rule_id = ${id}`
     await audit(actorOf(req), 'rule.deleted', id)
     return json({ ok: true, version: configVersion('rules') })
   })

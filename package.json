@@ -10,6 +10,7 @@
     "smoke": "bun scripts/smoke.ts",
     "loadtest": "bun scripts/loadtest.ts",
     "chaos": "bun scripts/chaos.ts",
+    "chaos:restart": "bun scripts/chaos-restart.ts",
     "eval:mapping": "bun scripts/eval-mapping.ts"
   },
   "dependencies": {
