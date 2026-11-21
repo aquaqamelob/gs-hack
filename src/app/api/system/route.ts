@@ -1,4 +1,5 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
+import { me, visibleAddresses } from '@/lib/engine/auth'
 import { audit } from '@/lib/engine/bus'
 import { ADAPTERS } from '@/lib/engine/channels'
 import { db, ms } from '@/lib/engine/db'
@@ -11,7 +12,7 @@ export const dynamic = 'force-dynamic'
 async function gatewayMessages() {
   try {
     const res = await fetch(
-      `${(process.env.SMS_GATEWAY_URL ?? 'http://localhost:4010').replace(/\/$/, '')}/messages?limit=100`,
+      `${(process.env.SMS_GATEWAY_URL ?? 'http://localhost:4010').replace(/\/$/, '')}/messages?limit=300`,
       {
         signal: AbortSignal.timeout(1500),
       }
@@ -33,6 +34,9 @@ export async function GET(req: Request) {
       db()`select * from audit_log order by id desc limit 300`,
       gatewayMessages(),
     ])
+    // Non-admins see only what was sent to their own (or their teams') phone and email.
+    const mine = visibleAddresses(me(req))
+    if (mine) gateway.messages = (gateway.messages as { to: string }[]).filter((m) => mine(m.to))
     return json({
       stats: await stats(since),
       instance: rt().instance,

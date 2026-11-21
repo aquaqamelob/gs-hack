@@ -10,7 +10,7 @@ import { api } from '@/lib/client'
 import { CHANNELS, SEVERITIES, type Channel, type Recipient } from '@/lib/engine/types'
 import { useEffect, useState } from 'react'
 
-export type Row = Recipient & { onShift?: boolean }
+export type Row = Recipient & { onShift?: boolean; onCallName?: string }
 
 function WorkingHours({ draft, setDraft }: { draft: Recipient; setDraft: (r: Recipient) => void }) {
   const h = draft.working_hours
@@ -75,7 +75,7 @@ export function RecipientCard({
   /** Admins also set a person's role and team membership. */
   isAdmin?: boolean
 }) {
-  const { onShift, ...base } = r
+  const { onShift, onCallName: _onCallName, ...base } = r
   const [draft, setDraft] = useState<Recipient>(base)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
@@ -144,6 +144,9 @@ export function RecipientCard({
               onChange={(e) => setDraft({ ...draft, onCall: e.target.value || undefined })}
             >
               <option value="">No on-call person</option>
+              {r.onCall && !all.some((x) => x.id === r.onCall) && (
+                <option value={r.onCall}>On call: {r.onCallName ?? r.onCall}</option>
+              )}
               {all
                 .filter((x) => x.kind === 'person')
                 .map((p) => (

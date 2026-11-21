@@ -25,6 +25,27 @@ export class Forbidden extends Error {
   status = 403
 }
 
+/**
+ * Recipients a person may see: themselves and the teams they belong to. `null` means everyone (admin).
+ * An unknown actor sees nobody.
+ */
+export function visibleRecipientIds(who: Me): Set<string> | null {
+  if (who.role === 'admin') return null
+  return who.known ? new Set([who.id, ...who.teams]) : new Set()
+}
+
+const normAddress = (a: string) => (a.includes('@') ? a.trim().toLowerCase() : a.replace(/[^\d+]/g, ''))
+
+/** Phone numbers and email addresses of the recipients a person may see; `null` means all (admin). */
+export function visibleAddresses(who: Me): ((address: string) => boolean) | null {
+  const ids = visibleRecipientIds(who)
+  if (!ids) return null
+  const mine = new Set<string>()
+  for (const r of rt().recipients)
+    if (ids.has(r.id)) for (const a of [r.phone, r.email]) if (a) mine.add(normAddress(a))
+  return (address) => mine.has(normAddress(String(address ?? '')))
+}
+
 /** Personal filter = a rule owned by one person that only notifies that person. */
 export function isPersonalRuleOf(rule: Pick<Rule, 'team' | 'notify'>, personId: string) {
   return rule.team === personId && rule.notify.length > 0 && rule.notify.every((n) => n.to === personId)

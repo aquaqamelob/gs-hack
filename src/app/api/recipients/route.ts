@@ -1,5 +1,5 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
-import { assertCanEditRecipient, me } from '@/lib/engine/auth'
+import { assertCanEditRecipient, me, visibleRecipientIds } from '@/lib/engine/auth'
 import { audit } from '@/lib/engine/bus'
 import { insideWorkingHours } from '@/lib/engine/channels'
 import { saveRecipients } from '@/lib/engine/config'
@@ -8,13 +8,23 @@ import { CHANNELS, SEVERITIES, type Recipient } from '@/lib/engine/types'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
-  return handle(async () =>
-    json({
-      recipients: rt().recipients.map((r) => ({ ...r, onShift: insideWorkingHours(r) })),
+/** Admins see everyone; a person sees only themselves and their own teams. */
+export async function GET(req: Request) {
+  return handle(async () => {
+    const ids = visibleRecipientIds(me(req))
+    const all = rt().recipients
+    return json({
+      recipients: all
+        .filter((r) => !ids || ids.has(r.id))
+        .map((r) => ({
+          ...r,
+          onShift: insideWorkingHours(r),
+          // Only the name: a team member may see who is on call without seeing that person's contacts.
+          ...(r.onCall ? { onCallName: all.find((p) => p.id === r.onCall)?.name ?? r.onCall } : {}),
+        })),
       defaultOwner: rt().defaultOwner,
     })
-  )
+  })
 }
 
 export async function PUT(req: Request) {
