@@ -57,13 +57,26 @@ export async function api<T = unknown>(path: string, init?: { method?: string; b
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok)
-    throw new Error(
+    throw new ApiError(
       (data as { error?: string; message?: string }).error ??
         (data as { message?: string }).message ??
-        `HTTP ${res.status}`
+        `HTTP ${res.status}`,
+      res.status
     )
   return data as T
 }
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number
+  ) {
+    super(message)
+  }
+}
+
+/** 409: someone (maybe on another instance) changed the config since this page loaded it. */
+export const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409
 
 type Listener = {
   onAlerts?: (a: AlertSummary[]) => void

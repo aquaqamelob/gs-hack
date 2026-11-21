@@ -4,7 +4,7 @@ import { Badge } from '@/components/badge'
 import { Button } from '@/components/button'
 import { Heading } from '@/components/heading'
 import { Text } from '@/components/text'
-import { api, useLive } from '@/lib/client'
+import { api, isConflict, useLive } from '@/lib/client'
 import type { Rule } from '@/lib/engine/types'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
@@ -38,16 +38,17 @@ export default function RulesPage() {
       await load()
     } catch (e) {
       setError((e as Error).message)
+      if (isConflict(e)) void load()
     }
   }
   const toggle = (r: Rule) =>
     run(() => {
       const { summary: _s, ...clean } = r as RuleRow
-      return api('/api/rules', { method: 'PUT', body: { rule: { ...clean, enabled: r.enabled === false } } })
+      return api('/api/rules', { method: 'PUT', body: { rule: { ...clean, enabled: r.enabled === false }, version: meta.version } })
     })
   const remove = (r: Rule) =>
     confirm(`Delete rule “${r.name}”?`) &&
-    run(() => api(`/api/rules?id=${encodeURIComponent(r.id)}`, { method: 'DELETE' }))
+    run(() => api(`/api/rules?id=${encodeURIComponent(r.id)}&version=${meta.version}`, { method: 'DELETE' }))
 
   return (
     <>
@@ -82,6 +83,7 @@ export default function RulesPage() {
           key={editing === 'new' ? 'new' : editing.id}
           initial={editing === 'new' ? null : editing}
           meta={meta}
+          reload={() => void load()}
           onClose={(saved) => {
             setEditing(null)
             if (saved) void load()

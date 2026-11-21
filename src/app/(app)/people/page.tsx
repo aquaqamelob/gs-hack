@@ -52,6 +52,7 @@ function ReplySimulator({ defaultFrom }: { defaultFrom?: string }) {
 
 export default function PeoplePage() {
   const [recipients, setRecipients] = useState<Row[] | null>(null)
+  const [version, setVersion] = useState('')
   const [messages, setMessages] = useState<GatewayMessage[]>([])
   const [gatewayUp, setGatewayUp] = useState(true)
   const [mailhog, setMailhog] = useState('')
@@ -60,10 +61,11 @@ export default function PeoplePage() {
 
   const load = useCallback(async () => {
     const [r, s] = await Promise.all([
-      api<{ recipients: Row[] }>('/api/recipients'),
+      api<{ recipients: Row[]; version: string }>('/api/recipients'),
       api<{ gateway: { up: boolean; messages: GatewayMessage[] }; mailhog: string }>('/api/system'),
     ])
     setRecipients(r.recipients)
+    setVersion(r.version)
     setMessages(s.gateway.messages)
     setGatewayUp(s.gateway.up)
     setMailhog(s.mailhog)
@@ -104,6 +106,7 @@ export default function PeoplePage() {
               key={r.id}
               r={r}
               all={list}
+              version={version}
               onSaved={load}
               editable={isAdmin || r.id === me?.id}
               isAdmin={isAdmin}

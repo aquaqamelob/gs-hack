@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/checkbox'
 import { Input } from '@/components/input'
 import { Select } from '@/components/select'
 import { Text } from '@/components/text'
-import { api } from '@/lib/client'
+import { api, isConflict } from '@/lib/client'
 import { CHANNELS, SEVERITIES, type Channel, type Recipient } from '@/lib/engine/types'
 import { useEffect, useState } from 'react'
 
@@ -63,12 +63,15 @@ function WorkingHours({ draft, setDraft }: { draft: Recipient; setDraft: (r: Rec
 export function RecipientCard({
   r,
   all,
+  version,
   onSaved,
   editable = true,
   isAdmin = false,
 }: {
   r: Row
   all: Recipient[]
+  /** `version` from GET /api/recipients; a stale one makes the save fail with 409. */
+  version?: string
   onSaved: () => void
   /** False: shown read-only (someone else's preferences, and you are not an admin). */
   editable?: boolean
@@ -201,11 +204,13 @@ export function RecipientCard({
           onClick={async () => {
             setError('')
             try {
-              await api('/api/recipients', { method: 'PUT', body: { recipient: draft } })
+              await api('/api/recipients', { method: 'PUT', body: { recipient: draft, version } })
               setSaved(true)
               onSaved()
             } catch (e) {
               setError((e as Error).message)
+              // Reload shows the other change (the draft follows the fresh data) and brings the new version.
+              if (isConflict(e)) onSaved()
             }
           }}
         >
