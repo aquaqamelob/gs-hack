@@ -6,7 +6,7 @@ import { Input } from '@/components/input'
 import { Select } from '@/components/select'
 import { Text } from '@/components/text'
 import { Textarea } from '@/components/textarea'
-import { COLOR_BAR, SEVERITY_BADGE, api, timeAgo, useLevel, useLive, useMetrics, useNow, type AlertSummary, type Level } from '@/lib/client'
+import { COLOR_BAR, SEVERITY_BADGE, api, timeAgo, useLive, useMetrics, useNow, type AlertSummary } from '@/lib/client'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
@@ -31,7 +31,7 @@ function describeResult(r: DemoResult) {
   return `${n} event${n === 1 ? '' : 's'} via ${r.via ?? 'webhook'} → ${rules}${r.unassigned ? ` · ${r.unassigned} to Unassigned` : ''}`
 }
 
-function DemoPanel({ level }: { level: Level }) {
+function DemoPanel() {
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
   const [custom, setCustom] = useState('')
@@ -76,15 +76,13 @@ function DemoPanel({ level }: { level: Level }) {
           </Button>
         ))}
       </div>
-      {level !== 'simple' && (
-        <details className="mt-3">
-          <summary className="cursor-pointer text-sm font-medium">Send your own JSON…</summary>
-          <Textarea rows={5} value={custom} onChange={(e) => setCustom(e.target.value)} placeholder='{"anything": "any shape"}' className="mt-2 font-mono" />
-          <Button className="mt-2" color="dark/zinc" disabled={!custom.trim() || busy !== null} onClick={sendCustom}>
-            Send to POST /ingest/webhook
-          </Button>
-        </details>
-      )}
+      <details className="mt-3">
+        <summary className="cursor-pointer text-sm font-medium">Send your own JSON…</summary>
+        <Textarea rows={5} value={custom} onChange={(e) => setCustom(e.target.value)} placeholder='{"anything": "any shape"}' className="mt-2 font-mono" />
+        <Button className="mt-2" color="dark/zinc" disabled={!custom.trim() || busy !== null} onClick={sendCustom}>
+          Send to POST /ingest/webhook
+        </Button>
+      </details>
       {msg && <Text className="mt-3 font-medium">{msg}</Text>}
     </div>
   )
@@ -120,7 +118,7 @@ function Actions({ a, onAction, small }: { a: AlertSummary; onAction: (id: strin
   )
 }
 
-function AlertCard({ a, now, level, flash, onAction }: { a: AlertSummary; now: number; level: Level; flash: boolean; onAction: (id: string, op: string) => void }) {
+function AlertCard({ a, now, flash, onAction }: { a: AlertSummary; now: number; flash: boolean; onAction: (id: string, op: string) => void }) {
   const nextStep = a.steps.find((s) => s.status !== 'done' && s.status !== 'skipped')
   const unassigned = a.team === 'unassigned'
   return (
@@ -134,30 +132,23 @@ function AlertCard({ a, now, level, flash, onAction }: { a: AlertSummary; now: n
           {a.count > 1 && <Badge color="zinc">×{a.count.toLocaleString()}</Badge>}
           <StatusBadge a={a} />
           <span className="text-xs text-zinc-500">
-            {level === 'simple'
-              ? `${a.count > 1 ? `happened ${a.count.toLocaleString()} times, ` : ''}last ${timeAgo(a.lastSeen, now)} · ${a.team}`
-              : `${a.team} · ${a.ruleName} · ${timeAgo(a.lastSeen, now)}`}
+            {`${a.team} · ${a.ruleName} · ${timeAgo(a.lastSeen, now)}`}
           </span>
         </div>
         <Link href={`/alerts/${a.id}`} className="mt-1 block text-base/6 font-semibold hover:underline">
           {a.title}
         </Link>
         {a.body && <p className="mt-0.5 line-clamp-2 text-sm/6 text-zinc-600 dark:text-zinc-400">{a.body}</p>}
-        {level === 'expert' && (
-          <p className="mt-1 font-mono text-xs text-zinc-500">
-            {a.source} · {a.schemaName} · first {timeAgo(a.firstSeen, now)} · {a.id}
-          </p>
-        )}
         {unassigned && a.status !== 'resolved' && (
           <p className="mt-2 text-sm/6">
             <Link href={`/schemas?fp=${a.schemaFp}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
-              {level === 'simple' ? 'Explain this message type →' : 'Map this schema →'}
+              Map this schema →
             </Link>
           </p>
         )}
         {nextStep && a.status !== 'resolved' && (
           <p className="mt-2 text-sm/6">
-            <span className="font-medium">{level === 'simple' ? 'What to do next:' : 'Next step:'}</span> {nextStep.text}
+            <span className="font-medium">Next step:</span> {nextStep.text}
             {nextStep.approval === 'required' && (
               <Badge color="purple" className="ml-2">
                 needs approval
@@ -173,7 +164,7 @@ function AlertCard({ a, now, level, flash, onAction }: { a: AlertSummary; now: n
   )
 }
 
-function AlertLine({ a, now, level, flash, onAction }: { a: AlertSummary; now: number; level: Level; flash: boolean; onAction: (id: string, op: string) => void }) {
+function AlertLine({ a, now, flash, onAction }: { a: AlertSummary; now: number; flash: boolean; onAction: (id: string, op: string) => void }) {
   return (
     <li className={`flex items-center gap-3 py-2 pl-2 text-sm ${flash ? 'bg-blue-50 dark:bg-blue-500/10' : ''} ${a.status === 'resolved' ? 'opacity-60' : ''}`}>
       <span className={`h-6 w-1 shrink-0 rounded ${COLOR_BAR[a.color] ?? 'bg-zinc-400'}`} />
@@ -184,7 +175,6 @@ function AlertLine({ a, now, level, flash, onAction }: { a: AlertSummary; now: n
       <Link href={`/alerts/${a.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">
         {a.title}
       </Link>
-      {level === 'expert' && <span className="hidden w-40 truncate font-mono text-xs text-zinc-500 xl:block">{a.source} · {a.schemaName}</span>}
       <span className="hidden w-32 truncate text-xs text-zinc-500 md:block">{a.team}</span>
       <StatusBadge a={a} />
       <span className="w-16 shrink-0 text-right text-xs text-zinc-500">{timeAgo(a.lastSeen, now)}</span>
@@ -222,7 +212,6 @@ function groupKey(a: AlertSummary, by: GroupBy) {
 const PREFS_KEY = 'ctrl.feed'
 
 export default function Feed() {
-  const [level] = useLevel()
   const [alerts, setAlerts] = useState<Map<string, AlertSummary>>(new Map())
   const [team, setTeam] = useState('')
   const [status, setStatus] = useState('active')
@@ -314,7 +303,6 @@ export default function Feed() {
     for (const a of items.filter((x) => x.status === 'open')) await onAction(a.id, 'ack')
   }
 
-  const isCompact = compact || level === 'expert'
   const toggle = (k: string) =>
     setCollapsed((c) => {
       const n = new Set(c)
@@ -330,10 +318,7 @@ export default function Feed() {
           <div className="flex items-baseline gap-3">
             <h1 className="text-2xl/8 font-semibold sm:text-xl/8">Live alerts</h1>
             <span className="text-sm text-zinc-500">
-              {level === 'simple'
-                ? `${m?.openAlerts ?? 0} need attention`
-                : `${(m?.events ?? 0).toLocaleString()} events → ${(m?.alertsCreated ?? 0).toLocaleString()} alerts (15 min) · ${m?.noiseReduction ? `${m.noiseReduction}:1 noise reduction` : '—'} · ${m?.openAlerts ?? 0} open`}
-              {level === 'expert' && m ? ` · e2e p50 ${m.endToEnd.all.p50} / p99 ${m.endToEnd.all.p99} ms · ${m.pending} pending · ${m.dead} dead` : ''}
+              {`${(m?.events ?? 0).toLocaleString()} events → ${(m?.alertsCreated ?? 0).toLocaleString()} alerts (15 min) · ${m?.noiseReduction ? `${m.noiseReduction}:1 noise reduction` : '—'} · ${m?.openAlerts ?? 0} open`}
             </span>
           </div>
           <div className="flex gap-2">
@@ -380,27 +365,25 @@ export default function Feed() {
             <option value="newest">Newest first</option>
             <option value="count">Most frequent first</option>
           </Select>
-          {level !== 'expert' && (
-            <div className="flex rounded-lg bg-zinc-100 p-0.5 text-xs font-medium dark:bg-zinc-800">
-              {[
-                { v: false, l: 'Cards' },
-                { v: true, l: 'List' },
-              ].map((o) => (
-                <button
-                  key={o.l}
-                  onClick={() => setCompact(o.v)}
-                  className={`rounded-md px-2.5 py-1.5 ${compact === o.v ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-500'}`}
-                >
-                  {o.l}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex rounded-lg bg-zinc-100 p-0.5 text-xs font-medium dark:bg-zinc-800">
+            {[
+              { v: false, l: 'Cards' },
+              { v: true, l: 'List' },
+            ].map((o) => (
+              <button
+                key={o.l}
+                onClick={() => setCompact(o.v)}
+                className={`rounded-md px-2.5 py-1.5 ${compact === o.v ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-500'}`}
+              >
+                {o.l}
+              </button>
+            ))}
+          </div>
           <span className="ml-auto text-xs text-zinc-500">{visible.length} shown</span>
         </div>
       </div>
 
-      {demo && <DemoPanel level={level} />}
+      {demo && <DemoPanel />}
 
       <div className="mt-6 space-y-6">
         {groups.map((g) => {
@@ -427,16 +410,16 @@ export default function Feed() {
                 </div>
               )}
               {!isCollapsed &&
-                (isCompact ? (
+                (compact ? (
                   <ul className="divide-y divide-zinc-950/5 dark:divide-white/5">
                     {g.items.map((a) => (
-                      <AlertLine key={a.id} a={a} now={now} level={level} flash={flash.has(a.id)} onAction={onAction} />
+                      <AlertLine key={a.id} a={a} now={now} flash={flash.has(a.id)} onAction={onAction} />
                     ))}
                   </ul>
                 ) : (
                   <ul className="space-y-3">
                     {g.items.map((a) => (
-                      <AlertCard key={a.id} a={a} now={now} level={level} flash={flash.has(a.id)} onAction={onAction} />
+                      <AlertCard key={a.id} a={a} now={now} flash={flash.has(a.id)} onAction={onAction} />
                     ))}
                   </ul>
                 ))}

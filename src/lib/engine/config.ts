@@ -62,7 +62,6 @@ export function cleanField(f: Partial<CustomField>): CustomField {
   return {
     key,
     description: String(f.description ?? '').trim() || key,
-    ...(f.question?.trim() ? { question: f.question.trim() } : {}),
     synonyms: [...synonyms],
     type: f.type ?? 'text',
   }
