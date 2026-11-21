@@ -13,8 +13,11 @@ type GatewayMessage = { id: number; channel: string; to: string; text: string; a
 
 const CHANNEL_ICON: Record<string, string> = { phone: '📞', sms: '💬', email: '✉️', webhook: '⚙️' }
 
-function ReplySimulator() {
-  const [from, setFrom] = useState('+48 600 333 444')
+function ReplySimulator({ defaultFrom }: { defaultFrom?: string }) {
+  const [from, setFrom] = useState(defaultFrom ?? '+48 600 333 444')
+  useEffect(() => {
+    if (defaultFrom) setFrom(defaultFrom)
+  }, [defaultFrom])
   const [text, setText] = useState('')
   const [result, setResult] = useState('')
   return (
@@ -48,7 +51,7 @@ function ReplySimulator() {
 }
 
 export default function PeoplePage() {
-  const [recipients, setRecipients] = useState<Row[]>([])
+  const [recipients, setRecipients] = useState<Row[] | null>(null)
   const [messages, setMessages] = useState<GatewayMessage[]>([])
   const [gatewayUp, setGatewayUp] = useState(true)
   const [mailhog, setMailhog] = useState('')
@@ -67,10 +70,18 @@ export default function PeoplePage() {
   }, [])
   useEffect(() => {
     void load()
+    // Switching the signed-in person changes what the server lets us see.
+    const onActor = () => void load()
+    window.addEventListener('actor-changed', onActor)
+    return () => window.removeEventListener('actor-changed', onActor)
   }, [load])
   useLive({ onChanged: (k) => k.includes('config:config') && void load(), onAlerts: () => void load() })
 
+  const list = recipients ?? []
   const shown = messages.filter((m) => !filter || m.channel === filter)
+  // Self first, then own teams (the server already hides everyone else from non-admins).
+  const ordered = [...list].sort((a, b) => Number(b.id === me?.id) - Number(a.id === me?.id))
+  const self = list.find((r) => r.id === me?.id)
 
   return (
     <>
@@ -79,17 +90,20 @@ export default function PeoplePage() {
         Who prefers which channel for which severity, and when. A rule can name channels explicitly; otherwise these
         preferences apply. Stored in <code>config/recipients.yaml</code>.{' '}
         {isAdmin
-          ? 'As an admin you can change everyone, including roles and team membership.'
-          : 'You can change only your own preferences.'}
+          ? 'As an admin you can see and change everyone, including roles and team membership.'
+          : 'You see your own settings and the teams you belong to. You can change only your own preferences.'}
       </Text>
 
       <div className="mt-8 grid gap-8 xl:grid-cols-2">
         <div className="space-y-4">
-          {recipients.map((r) => (
+          {recipients !== null && !isAdmin && list.length === 0 && (
+            <Text>Pick yourself in the bottom-left corner to see your channels and preferences.</Text>
+          )}
+          {ordered.map((r) => (
             <RecipientCard
               key={r.id}
               r={r}
-              all={recipients}
+              all={list}
               onSaved={load}
               editable={isAdmin || r.id === me?.id}
               isAdmin={isAdmin}
@@ -97,10 +111,10 @@ export default function PeoplePage() {
           ))}
         </div>
         <div className="space-y-6">
-          <ReplySimulator />
+          <ReplySimulator defaultFrom={isAdmin ? undefined : self?.phone} />
           <div>
             <div className="flex items-center justify-between">
-              <Subheading>Received by the mock gateway</Subheading>
+              <Subheading>{isAdmin ? 'Received by the mock gateway' : 'Sent to you and your teams'}</Subheading>
               <Select value={filter} onChange={(e) => setFilter(e.target.value)} className="w-40">
                 <option value="">All</option>
                 {['phone', 'sms', 'email', 'webhook'].map((c) => (
