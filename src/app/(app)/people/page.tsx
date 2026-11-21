@@ -143,7 +143,7 @@ function RecipientCard({ r, all, onSaved }: { r: Row; all: Recipient[]; onSaved:
           Save preferences
         </Button>
       )}
-      {saved && !dirty && <Text className="mt-2">Saved to config/recipients.yaml</Text>}
+      {saved && !dirty && <Text className="mt-2">Saved. Every instance picks it up</Text>}
     </div>
   )
 }
@@ -156,18 +156,20 @@ function ReplySimulator() {
     <div className="rounded-xl border border-zinc-950/10 p-4 dark:border-white/10">
       <Subheading>Reply to an alert (SMS / email gateway)</Subheading>
       <Text>
-        Each alert has a 4-digit code valid for one hour. “ACK 1234” acknowledges, “YES 1234” approves the next step that needs
-        approval, “RESOLVE 1234” closes. Every reply is in the audit log.
+        Each alert has a 6-digit code valid for one hour. “ACK 123456” acknowledges, “YES 123456” approves the next step that needs
+        approval, “RESOLVE 123456” closes. A reply only counts from a phone number or email address the alert was sent to;
+        5 failed attempts from one sender lock it out for 15 minutes. Every reply is in the audit log. This simulator sends
+        the reply through the mock gateway, which signs the webhook like a real provider would.
       </Text>
       <div className="mt-3 flex flex-wrap gap-2">
         <Input value={from} onChange={(e) => setFrom(e.target.value)} className="max-w-48" />
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="YES 4821" className="max-w-40" />
+        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="YES 482113" className="max-w-40" />
         <Button
           color="dark/zinc"
           disabled={!text}
           onClick={async () => {
             try {
-              const r = await api<{ message: string }>('/api/reply', { body: { from, text } })
+              const r = await api<{ message: string }>('/api/demo', { body: { scenario: 'reply', from, text } })
               setResult(r.message)
             } catch (e) {
               setResult((e as Error).message)
@@ -202,7 +204,7 @@ export default function PeoplePage() {
   useEffect(() => {
     void load()
   }, [load])
-  useLive({ onChanged: (k) => k.includes('config:config') && void load(), onAlerts: () => void load() })
+  useLive({ onChanged: (k) => (k.includes('config:recipients') || k.includes('config:all')) && void load(), onAlerts: () => void load() })
 
   const shown = messages.filter((m) => !filter || m.channel === filter)
 
@@ -211,7 +213,7 @@ export default function PeoplePage() {
       <Heading>People & channels</Heading>
       <Text>
         Who prefers which channel for which severity, and when. A rule can name channels explicitly; otherwise these preferences
-        apply. Stored in <code>config/recipients.yaml</code>.
+        apply. Stored in Postgres, seeded from <code>config/recipients.yaml</code> on first boot.
       </Text>
 
       <div className="mt-8 grid gap-8 xl:grid-cols-2">

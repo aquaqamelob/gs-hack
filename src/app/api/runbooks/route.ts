@@ -1,6 +1,6 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
 import { audit } from '@/lib/engine/bus'
-import { saveRunbookFile } from '@/lib/engine/config'
+import { saveRunbook } from '@/lib/engine/config'
 import { db } from '@/lib/engine/db'
 import { detectFormat, parseRunbookContent } from '@/lib/engine/runbooks'
 import { rt } from '@/lib/engine/runtime'
@@ -35,8 +35,9 @@ export async function POST(req: Request) {
     }
     if (body.preview) return json({ format, runbook: parsed })
     if (!body.id) return fail('id is required')
-    const id = saveRunbookFile(body.id, format, content)
-    await audit(actorOf(req, body), 'runbook.saved', id, `${format}, ${parsed.steps.length} steps`)
+    const actor = actorOf(req, body)
+    const id = await saveRunbook(body.id, format, content, actor)
+    await audit(actor, 'runbook.saved', id, `${format}, ${parsed.steps.length} steps`)
     return json({ ok: true, id, format })
   })
 }

@@ -217,30 +217,76 @@ export async function stepAction(id: string, stepId: string, op: StepOp, actor: 
   })
 }
 
-export async function handleReply(from: string, text: string) {
-  const m = text.trim().match(/^(YES|TAK|APPROVE|ACK|OK|RESOLVE)\s+(\d{4})\b/i)
-  if (!m) return { ok: false, message: 'Unrecognised reply. Use "ACK 1234", "YES 1234" or "RESOLVE 1234".' }
+export const REPLY_MAX_FAILURES = 5
+export const REPLY_WINDOW_MIN = 15
+const REPLY_CHANNELS = ['sms', 'phone', 'email']
+
+/** Phone numbers without separators; emails lowercased, "Name <a@b>" reduced to the address. */
+export function normalizeAddress(value: string) {
+  const v = value.trim().toLowerCase()
+  const addr = (v.match(/<([^>]+)>/)?.[1] ?? v).trim()
+  return addr.includes('@') ? addr : addr.replace(/[\s\-().]/g, '')
+}
+
+export interface ReplyResult {
+  ok: boolean
+  status: number
+  message: string
+  alertId?: string
+}
+
+/**
+ * Inbound SMS/email reply. The webhook itself is authenticated by the route; here:
+ * 1. at most REPLY_MAX_FAILURES failed attempts per sender per REPLY_WINDOW_MIN (counted in Postgres, so across instances),
+ * 2. the code must belong to an open, unexpired alert,
+ * 3. the sender must be an address that alert was delivered to (sms / phone / email).
+ */
+export async function handleReply(from: string, text: string): Promise<ReplyResult> {
+  const sender = normalizeAddress(from)
+  const actor = `reply:${from}`
+  // Record the attempt as failed up front and count afterwards: concurrent attempts each see the earlier ones,
+  // so no more than REPLY_MAX_FAILURES can get past the check. A successful reply deletes its row.
+  const [attempt] = await db()`insert into reply_failures (sender) values (${sender}) returning id`
+  const [{ n }] = await db()`
+    select count(*)::int as n from reply_failures
+    where sender = ${sender} and at > now() - make_interval(mins => ${REPLY_WINDOW_MIN})`
+  if (n > REPLY_MAX_FAILURES) {
+    await audit(actor, 'reply.rate-limited', 'reply', `${n - 1} failed attempts in ${REPLY_WINDOW_MIN} min`)
+    return { ok: false, status: 429, message: `Too many failed attempts. Try again in ${REPLY_WINDOW_MIN} minutes.` }
+  }
+  const failed = async (status: number, message: string, action: string, target = 'reply', alertId?: string) => {
+    await audit(actor, action, target, message)
+    return { ok: false, status, message, ...(alertId ? { alertId } : {}) }
+  }
+
+  const m = text.trim().match(/^(YES|TAK|APPROVE|ACK|OK|RESOLVE)\s+(\d{6})\b/i)
+  if (!m) return failed(400, 'Unrecognised reply. Use "ACK 123456", "YES 123456" or "RESOLVE 123456".', 'reply.failed')
   const verb = m[1].toUpperCase()
   const [row] = await db()`
     select id from alerts
-    where approval_code = ${m[2]} and status <> 'resolved' and approval_expires_at > now()
-    order by first_seen desc limit 1`
-  if (!row) return { ok: false, message: `No open alert with code ${m[2]} (expired or unknown).` }
+    where approval_code = ${m[2]} and status <> 'resolved' and approval_expires_at > now()`
+  if (!row) return failed(400, `No open alert with code ${m[2]} (expired or unknown).`, 'reply.failed')
   const id = row.id as string
-  const actor = `reply:${from}`
+
+  const addresses = await db()<{ address: string }[]>`
+    select distinct address from deliveries where alert_id = ${id} and channel in ${db()(REPLY_CHANNELS)}`
+  if (!addresses.some((d) => d.address && normalizeAddress(d.address) === sender))
+    return failed(403, 'Sender is not a recipient of this alert.', 'reply.rejected', id, id)
+
+  await db()`delete from reply_failures where id = ${attempt.id}`
   if (verb === 'ACK' || verb === 'OK') {
     const a = await ackAlert(id, actor)
-    return { ok: true, message: `Acknowledged: ${a.title}`, alertId: id }
+    return { ok: true, status: 200, message: `Acknowledged: ${a.title}`, alertId: id }
   }
   if (verb === 'RESOLVE') {
     const a = await resolveAlert(id, actor, 'Resolved by reply')
-    return { ok: true, message: `Resolved: ${a?.title}`, alertId: id }
+    return { ok: true, status: 200, message: `Resolved: ${a?.title}`, alertId: id }
   }
   const alert = (await getAlert(id))!
   const step =
     alert.steps.find((s) => s.status === 'awaiting_approval') ??
     alert.steps.find((s) => s.approval === 'required' && (s.status === 'todo' || s.status === 'failed'))
-  if (!step) return { ok: false, message: 'Nothing waiting for approval on this alert.' }
+  if (!step) return { ok: false, status: 409, message: 'Nothing waiting for approval on this alert.', alertId: id }
   const done = await stepAction(id, step.id, 'approve', actor)
-  return { ok: true, message: `Approved and ran: ${step.text} → ${done?.output}`, alertId: id }
+  return { ok: true, status: 200, message: `Approved and ran: ${step.text} → ${done?.output}`, alertId: id }
 }

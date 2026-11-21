@@ -1,6 +1,6 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
 import { audit, publish } from '@/lib/engine/bus'
-import { deleteRunbookFile, saveRunbookFile } from '@/lib/engine/config'
+import { deleteRunbook, saveRunbook } from '@/lib/engine/config'
 import { db } from '@/lib/engine/db'
 import { LlmUnavailable, llmModel, structureRunbook } from '@/lib/engine/llm'
 import { rt } from '@/lib/engine/runtime'
@@ -47,7 +47,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           })),
           source: { format: rb.format, text: rb.content },
         }
-        saveRunbookFile(rb.id, 'yaml', `# Structured from ${rb.format} by ${p.model}, approved by ${actor}\n${YAML.stringify(doc, { lineWidth: 0 })}`)
+        await saveRunbook(rb.id, 'yaml', `# Structured from ${rb.format} by ${p.model}, approved by ${actor}\n${YAML.stringify(doc, { lineWidth: 0 })}`, actor)
         await db()`delete from ai_proposals where runbook_id = ${rb.id}`
         await audit(actor, 'runbook.ai-accepted', rb.id, `${p.steps.length} steps`)
         await publish({ type: 'config', what: 'runbooks' })
@@ -59,7 +59,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         await publish({ type: 'config', what: 'runbooks' })
         return json({ ok: true })
       case 'delete':
-        deleteRunbookFile(rb.id)
+        await deleteRunbook(rb.id, actor)
         await audit(actor, 'runbook.deleted', rb.id)
         return json({ ok: true })
       default:

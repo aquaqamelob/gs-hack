@@ -105,7 +105,7 @@ function NewRunbook({ onSaved }: { onSaved: () => void }) {
             }
           }}
         >
-          Save to config/runbooks/
+          Save runbook
         </Button>
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
@@ -134,7 +134,7 @@ export default function RunbooksPage() {
   useEffect(() => {
     void load()
   }, [load])
-  useLive({ onChanged: (k) => k.includes('config:runbooks') && void load() })
+  useLive({ onChanged: (k) => (k.includes('config:runbooks') || k.includes('config:all')) && void load() })
 
   if (!data) return <Text>Loading…</Text>
   const rb = data.runbooks.find((r) => r.id === selected)
@@ -159,8 +159,8 @@ export default function RunbooksPage() {
         <div>
           <Heading>Runbooks</Heading>
           <Text>
-            Files in <code>config/runbooks/</code>, reloaded live. Every format becomes the same list of steps. Steps that need
-            approval wait for a person (button, or SMS reply “YES 1234”).
+            Stored in Postgres (seeded from <code>config/runbooks/</code> on first boot); a save reaches every instance. Every format becomes the same list of steps. Steps that need
+            approval wait for a person (button, or SMS reply “YES 123456”).
           </Text>
         </div>
         <Button color="dark/zinc" onClick={() => setAdding(!adding)}>

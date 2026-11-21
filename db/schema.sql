@@ -71,7 +71,11 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE UNIQUE INDEX IF NOT EXISTS alerts_open_dedup ON alerts (dedup_key) WHERE status <> 'resolved';
 CREATE INDEX IF NOT EXISTS alerts_last_seen ON alerts (last_seen DESC);
 CREATE INDEX IF NOT EXISTS alerts_notify_due ON alerts (next_notify_at) WHERE next_notify_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS alerts_code ON alerts (approval_code) WHERE status <> 'resolved';
+-- Reply codes (6 digits, crypto.randomInt) are unique among alerts that are not resolved; inserts retry on conflict.
+-- Older 4-digit codes of open alerts are invalidated (non-numeric, so no reply can match) before the index is built.
+DROP INDEX IF EXISTS alerts_code;
+UPDATE alerts SET approval_code = 'legacy:' || id WHERE status <> 'resolved' AND approval_code !~ '^(\d{6}|legacy:.*)$';
+CREATE UNIQUE INDEX IF NOT EXISTS alerts_code_open ON alerts (approval_code) WHERE status <> 'resolved';
 
 -- Transactional outbox: rows are written in the same transaction as the alert change.
 CREATE TABLE IF NOT EXISTS deliveries (
@@ -113,4 +117,22 @@ CREATE TABLE IF NOT EXISTS ai_proposals (
   steps      jsonb NOT NULL,
   model      text  NOT NULL,
   at         timestamptz NOT NULL DEFAULT now()
+);
+
+-- Failed SMS/email reply attempts per normalised sender. Shared by every instance; the limit is a count over a window.
+CREATE TABLE IF NOT EXISTS reply_failures (
+  id     bigserial PRIMARY KEY,
+  sender text        NOT NULL,
+  at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS reply_failures_sender_at ON reply_failures (sender, at);
+
+-- Runtime-editable config (rules, recipients, runbooks). Seeded from config/*.yaml when empty; every instance
+-- caches it in memory and reloads on a pg_notify 'config' event (plus a periodic version check as a fallback).
+-- ids: 'rules' {rules: [...]}, 'recipients' {default_owner, recipients: [...]}, 'runbook:<id>' {file, format, content}.
+CREATE TABLE IF NOT EXISTS config_docs (
+  id         text PRIMARY KEY,
+  doc        jsonb       NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text        NOT NULL
 );
