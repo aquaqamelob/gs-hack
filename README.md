@@ -76,7 +76,7 @@ bun scripts/dev-db.ts            # embedded Postgres on :5432
 bun mock-gateway/server.ts       # mock gateway on :4010 + SMTP sink on :1025
 cp .env.example .env.local
 bun run dev                      # http://localhost:3000
-bun run smoke                    # 41 end-to-end checks against the running stack
+bun run smoke                    # 51 end-to-end checks against the running stack
 ```
 
 ## How it works
@@ -91,10 +91,26 @@ bun run smoke                    # 41 end-to-end checks against the running stac
 
 - **Ingest:** unknown schemas are never rejected (202); malformed JSON is 400, bad credentials 401. Events are written in batches in one transaction together with alert upserts and outbox rows.
 - **Schema mapping:** fingerprint = sorted key paths, mapping stored in Postgres. No model call on the alert path. Unmapped events that match no rule go to the Unassigned inbox and to the default owner (`unmapped_events_total`).
-- **Rules:** stored in Postgres (`config_docs`, seeded from `config/rules.yaml` on first boot); a save from any instance is broadcast with `pg_notify` and every instance reloads. `GET /api/rules/export` returns them as YAML. Recipients, custom fields and runbooks work the same way. Ops `eq, neq, in, not_in, gt, gte, lt, lte, regex, glob, exists`, nested `all`/`any`. Grouping like Alertmanager: `group_by`, `group_wait`, `group_interval`, `dedup_window`. The editor previews a rule against the last 1000 events (`RULE_PREVIEW_EVENTS`), including its noise budget. Evaluation errors are counted (`rule_errors_total`) and flagged on the rule.
+- **Rules:** stored in Postgres (`config_docs`, seeded from `config/rules.yaml` on first boot); a save from any instance is broadcast with `pg_notify` and every instance reloads. `GET /api/rules/export` returns them as YAML. Recipients, custom fields and runbooks work the same way. Ops `eq, neq, in, not_in, gt, gte, lt, lte, regex, glob, exists`, nested `all`/`any`, on any field: canonical, `source`, `schema` or any raw path. Each rule says who gets it and on which channels (`notify`), and how it looks (`present`: title and body templates such as `{{payload.notional | number}}`, the fields to show, a colour). Grouping like Alertmanager: `group_by`, `group_wait`, `group_interval`, `dedup_window`. The editor previews a rule against the last 1000 events (`RULE_PREVIEW_EVENTS`), including its noise budget. Evaluation errors are counted (`rule_errors_total`) and flagged on the rule.
 - **Delivery:** transactional outbox claimed with `FOR UPDATE SKIP LOCKED`, exponential backoff with jitter, dead-letter queue with requeue. Idempotency key = alert + notification + channel + recipient. Per-person channel preferences and working hours.
+- **Alerts:** the live feed is pushed over SSE. Acknowledge or resolve in the UI, or by replying `ACK <code>` / `RESOLVE <code>` to the SMS or email. An event with `resolved` status (e.g. Alertmanager `status: resolved`) closes its alert.
 - **People, filters and admin:** SSO is mocked — you pick who you are in the bottom-left corner and the console sends that id in `x-actor`. The role comes from the recipients config (`role: admin`), never from the request. **My view** (`/me`) shows a person's live alerts (their own plus those of the teams in `teams:` or where they are on call), their personal filters and their channel preferences. A person can create, pause, edit and delete only their own filters (a rule owned by them that notifies only them) and change only their own preferences. An **admin** changes every rule, including team filters, and every recipient, including roles and team membership. The API enforces this (403 otherwise).
-- **Runbooks:** YAML, Markdown or free text (seeded from `config/runbooks/`). One action kind, a webhook, configured by name in `config/actions.yaml`; targets allow-listed, secrets only from env. Approval in the UI or by replying `YES <code>` (expires after 1 h). Everything goes to the audit log.
+- **Runbooks:** YAML, Markdown or free text (seeded from `config/runbooks/`). A rule names its runbook with `runbook:`; otherwise a runbook's `matches:` (any field, e.g. `type` or `error.code`) picks it. Steps are filled in with values from the event. The UI and email show every step; the SMS carries the title, a link to the alert and the reply code. One action kind, a webhook, configured by name in `config/actions.yaml`; targets allow-listed, secrets only from env. Approval in the UI or by replying `YES <code>` (expires after 1 h). Everything goes to the audit log.
+
+## Adding your own
+
+| To add | How | Code? |
+| --- | --- | --- |
+| A source | `POST /ingest/<any-name>`, or a Kafka topic in `KAFKA_TOPICS`. Credentials per source from env: `INGEST_TOKEN_<NAME>` (bearer) or `INGEST_HMAC_<NAME>` | No |
+| A schema | Send an event. A new shape is fingerprinted and mapped; approve or fix the mapping on *Sources & schemas* | No |
+| A rule | Rule editor, `PUT /api/rules`, or `config/rules.yaml` on first boot. Live on every instance, no restart | No |
+| A runbook | Paste YAML, Markdown or free text on *Runbooks* and link it from a rule | No |
+| A runbook action | One entry in `config/actions.yaml`: method, URL template, auth from env, approval | No |
+| A channel or real provider | One `ChannelAdapter` in `src/lib/engine/channels.ts` | One file |
+
+A new team: an admin adds the team and its people with `PUT /api/recipients` (or in `config/recipients.yaml` before first boot) and edits them on *People*, then adds a rule with `notify: [{ to: <team> }]`. The next matching event reaches them.
+
+The brief's example rules are seeded in `config/rules.yaml`: `settlements-workflow-failed`, `pricing-log-warnings`, `rates-large-rejections` and `anna-payments-critical`. Its three runbooks are in `config/runbooks/`.
 
 ## Design decisions
 
@@ -181,7 +197,7 @@ The first three use an isolated Compose project (`ctrl-perf`) with its own datab
 ## Layout
 
 ```
-config/          seed files: rules.yaml, recipients.yaml, fields.yaml, runbooks/ (copied to Postgres on first boot); actions.yaml
+config/          seed files: rules.yaml, recipients.yaml, fields.yaml (optional), runbooks/ (copied to Postgres on first boot); actions.yaml
 db/schema.sql    Postgres schema (applied on start under an advisory lock)
 src/lib/engine/  pipeline, schemas, rules, outbox, channels, alerts, runbooks, actions, kafka, auth
 src/app/api/     ingest, stream (SSE), alerts, rules, schemas, runbooks, recipients, me, reply, system, metrics
@@ -189,5 +205,3 @@ src/app/(app)/   My view, Live alerts, alert detail, Rules, Sources & schemas, R
 mock-gateway/    SMS / phone / webhook mock (Bun)
 scripts/         smoke.ts, loadtest.ts, scale-curve.sh, chaos.sh, chaos-restart.ts, eval-mapping.ts, dev-db.ts
 ```
-
-UI components come from Tailwind Catalyst (see `LICENSE.md`).
