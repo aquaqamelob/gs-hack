@@ -43,13 +43,13 @@ export interface FieldInfo {
   format: FieldFormat
 }
 
-export type MappedBy = 'known-format' | 'deterministic' | 'fuzzy' | 'llm' | 'human'
+export type MappedBy = 'known-format' | 'deterministic' | 'fuzzy' | 'human'
 
 export interface MappingProposal {
   canonical: CanonicalKey
   path: string
   confidence: number
-  by: 'fuzzy' | 'llm'
+  by: 'fuzzy'
   reason?: string
   state: 'pending' | 'accepted' | 'rejected'
 }
@@ -68,7 +68,6 @@ export interface SchemaRecord {
   confidence: Partial<Record<CanonicalKey, number>>
   proposals: MappingProposal[]
   status: SchemaStatus
-  llm: { state: 'idle' | 'running' | 'done' | 'disabled' | 'error'; detail?: string; at?: number }
   eventCount: number
   firstSeen: number
   lastSeen: number
@@ -144,6 +143,10 @@ export interface Recipient {
   onCall?: string
   prefs: Partial<Record<Severity, Channel[]>>
   working_hours?: WorkingHours
+  /** People only. Admins change every rule and recipient; users change only their own filters and preferences. */
+  role?: 'admin' | 'user'
+  /** People only: teams whose alerts appear in the person's own view. */
+  teams?: string[]
 }
 
 /** The single action kind: an HTTP call. Named actions in config/actions.yaml expand to this. */
@@ -172,7 +175,7 @@ export interface Runbook {
   content: string
   matches?: Record<string, Json>
   steps: StepDef[]
-  parsedBy: 'parser' | 'llm' | 'fallback'
+  parsedBy: 'parser' | 'fallback'
 }
 
 export type StepStatus = 'todo' | 'awaiting_approval' | 'running' | 'done' | 'failed' | 'skipped'

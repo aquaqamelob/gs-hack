@@ -3,7 +3,6 @@
 import { Badge } from '@/components/badge'
 import { Button } from '@/components/button'
 import { Heading, Subheading } from '@/components/heading'
-import { Switch } from '@/components/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/table'
 import { Text } from '@/components/text'
 import { api, timeAgo, useLive, type Metrics } from '@/lib/client'
@@ -14,7 +13,6 @@ type Data = {
   stats: Metrics
   instance: string
   channels: { channel: string; label: string; provider: string }[]
-  llm: { enabled: boolean; model: string; endpoint: string }
   dlq: Delivery[]
   pending: Delivery[]
   audit: AuditEntry[]
@@ -31,7 +29,7 @@ export default function SystemPage() {
   }, [load])
   useLive({
     onStats: setMetrics,
-    onChanged: (k) => (k.includes('audit') || k.includes('llm')) && void load(),
+    onChanged: (k) => k.includes('audit') && void load(),
   })
 
   if (!data) return <Text>Loading…</Text>
@@ -46,8 +44,8 @@ export default function SystemPage() {
     <>
       <Heading>System & audit</Heading>
       <Text>
-        Measured from Postgres over the last {Math.round(m.windowSec / 60)} minutes, across all instances. This page is served by{' '}
-        <code>{data.instance}</code>. Reproducible numbers: <code>loadtest/</code>.
+        Measured from Postgres over the last {Math.round(m.windowSec / 60)} minutes, across all instances. This page is
+        served by <code>{data.instance}</code>. Reproducible numbers: <code>loadtest/</code>.
       </Text>
 
       <section className="mt-8">
@@ -78,8 +76,8 @@ export default function SystemPage() {
         </Table>
         <Text className="mt-2">
           {m.events.toLocaleString()} events ({m.eventsPerSec}/s now) · {m.matched.toLocaleString()} matched a rule ·{' '}
-          {m.alertsCreated} alerts created ({m.unassigned} unassigned) · {m.noiseReduction}× noise reduction · {m.retried} deliveries
-          needed a retry · {m.pending} pending · {m.dead} dead
+          {m.alertsCreated} alerts created ({m.unassigned} unassigned) · {m.noiseReduction}× noise reduction ·{' '}
+          {m.retried} deliveries needed a retry · {m.pending} pending · {m.dead} dead
         </Text>
       </section>
 
@@ -97,18 +95,10 @@ export default function SystemPage() {
               )}
             </div>
           ))}
-          <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-950/10 p-3 dark:border-white/10">
-            <span>
-              <span className="block font-medium">LLM (schema mapping, runbook structuring)</span>
-              <span className="block text-xs text-zinc-500">
-                {data.llm.model} · {data.llm.endpoint}. Never on the alert path.
-              </span>
-            </span>
-            <Switch color="green" checked={data.llm.enabled} onChange={(v) => post({ op: 'llm', enabled: v })} />
-          </label>
         </div>
         <Text className="mt-2">
-          Kill the SMS gateway or an app instance (<code>chaos/</code>): deliveries stay in the outbox and retry with backoff.
+          Kill the SMS gateway or an app instance (<code>chaos/</code>): deliveries stay in the outbox and retry with
+          backoff.
         </Text>
       </section>
 
@@ -141,7 +131,9 @@ export default function SystemPage() {
                   <TableCell>{d.channel}</TableCell>
                   <TableCell>{d.address}</TableCell>
                   <TableCell>
-                    <Badge color={d.status === 'dead' ? 'red' : 'amber'}>{d.status === 'dead' ? 'dead' : 'retrying'}</Badge>
+                    <Badge color={d.status === 'dead' ? 'red' : 'amber'}>
+                      {d.status === 'dead' ? 'dead' : 'retrying'}
+                    </Badge>
                   </TableCell>
                   <TableCell>{d.attempts}</TableCell>
                   <TableCell className="max-w-72 truncate">{d.lastError}</TableCell>

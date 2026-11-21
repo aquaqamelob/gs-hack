@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS schemas (
   confidence   jsonb       NOT NULL DEFAULT '{}',
   proposals    jsonb       NOT NULL DEFAULT '[]',
   status       text        NOT NULL,
-  llm          jsonb       NOT NULL DEFAULT '{"state":"idle"}',
   event_count  bigint      NOT NULL DEFAULT 0,
   first_seen   timestamptz NOT NULL DEFAULT now(),
   last_seen    timestamptz NOT NULL DEFAULT now()
@@ -108,9 +107,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_at ON audit_log (at DESC);
 
-CREATE TABLE IF NOT EXISTS ai_proposals (
-  runbook_id text PRIMARY KEY,
-  steps      jsonb NOT NULL,
-  model      text  NOT NULL,
-  at         timestamptz NOT NULL DEFAULT now()
-);
+-- LLM features were removed; drop their leftovers on existing databases.
+DROP TABLE IF EXISTS ai_proposals;
+ALTER TABLE schemas DROP COLUMN IF EXISTS llm;

@@ -93,7 +93,7 @@ export function parseRunbookContent(id: string, format: Runbook['format'], conte
       : [textStep(lines.filter((l) => !/^#/.test(l)).join(' '), 0)]
     return { id, title, format, content, steps, parsedBy: 'parser' }
   }
-  // Free text or a wiki dump: one readable step. The LLM can propose structure on request; a human approves it.
+  // Free text or a wiki dump: one readable step. A human can rewrite it as YAML/Markdown steps in the editor.
   const text = content.replace(/\s+/g, ' ').trim()
   const firstSentence = text.split(/(?<=[.!?])\s/)[0] ?? id
   return {

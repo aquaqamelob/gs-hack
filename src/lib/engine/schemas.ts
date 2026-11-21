@@ -1,9 +1,15 @@
 import { audit, publish } from './bus'
 import { db, ms, type Tx } from './db'
-import { LlmUnavailable, llmEnabled, llmModel, proposeMappings } from './llm'
 import { count, rt } from './runtime'
-import { computeMapping, describeFields, schemaName, schemaStatus, structureFingerprint, type MappingResult } from './schema'
-import { CANONICAL_KEYS, type CanonicalKey, type FieldInfo, type Json, type MappingProposal, type SchemaRecord } from './types'
+import {
+  computeMapping,
+  describeFields,
+  schemaName,
+  schemaStatus,
+  structureFingerprint,
+  type MappingResult,
+} from './schema'
+import { type CanonicalKey, type FieldInfo, type Json, type MappingProposal, type SchemaRecord } from './types'
 
 type Row = {
   fingerprint: string
@@ -17,7 +23,6 @@ type Row = {
   confidence: SchemaRecord['confidence']
   proposals: MappingProposal[]
   status: SchemaRecord['status']
-  llm: SchemaRecord['llm']
   eventCount: string | number
   firstSeen: Date
   lastSeen: Date
@@ -36,7 +41,6 @@ function fromRow(r: Row): SchemaRecord {
     confidence: r.confidence,
     proposals: r.proposals,
     status: r.status,
-    llm: r.llm,
     eventCount: Number(r.eventCount),
     firstSeen: ms(r.firstSeen)!,
     lastSeen: ms(r.lastSeen)!,
@@ -45,7 +49,10 @@ function fromRow(r: Row): SchemaRecord {
 
 // Shared through globalThis: API routes and the instrumentation loop that flushes it load separate module copies.
 const COUNTS_KEY = Symbol.for('ctrl.schema-counts.v1')
-const pendingCounts: Map<string, number> = ((globalThis as Record<symbol, unknown>)[COUNTS_KEY] ??= new Map()) as Map<string, number>
+const pendingCounts: Map<string, number> = ((globalThis as Record<symbol, unknown>)[COUNTS_KEY] ??= new Map()) as Map<
+  string,
+  number
+>
 
 export function invalidateSchema(fp: string) {
   rt().schemas.delete(fp)
@@ -65,7 +72,13 @@ async function inheritFrom(source: string, fields: FieldInfo[]): Promise<Row | u
   const rows = await db()<Row[]>`
     select * from schemas where source = ${source} and status in ('approved', 'mapped') and known_format is null
     order by last_seen desc limit 50`
-  return rows.find((r) => jaccard(r.fields.map((f) => f.path), paths) >= 0.8)
+  return rows.find(
+    (r) =>
+      jaccard(
+        r.fields.map((f) => f.path),
+        paths
+      ) >= 0.8
+  )
 }
 
 export async function observeSchema(raw: Json, source: string): Promise<SchemaRecord> {
@@ -94,7 +107,8 @@ export async function observeSchema(raw: Json, source: string): Promise<SchemaRe
     }
   }
   const proposals: MappingProposal[] = computed.proposals.map((p) => ({ ...p, state: 'pending' }))
-  const status = parent?.status === 'approved' && !proposals.length ? 'approved' : schemaStatus({ ...computed, proposals })
+  const status =
+    parent?.status === 'approved' && !proposals.length ? 'approved' : schemaStatus({ ...computed, proposals })
   const name = parent?.name ?? schemaName(raw, source, computed)
   const inserted = await db()<Row[]>`
     insert into schemas (fingerprint, source, name, known_format, fields, sample, mapping, mapped_by, confidence, proposals, status)
@@ -109,9 +123,13 @@ export async function observeSchema(raw: Json, source: string): Promise<SchemaRe
   if (inserted[0]) {
     count('schemas_detected_total')
     const mapped = Object.keys(schema.mapping).length
-    await audit('system', 'schema.detected', schema.name, `${fields.length} fields, ${mapped} mapped automatically, ${proposals.length} to review`)
+    await audit(
+      'system',
+      'schema.detected',
+      schema.name,
+      `${fields.length} fields, ${mapped} mapped automatically, ${proposals.length} to review`
+    )
     await publish({ type: 'schema', id: fp })
-    if (schema.status === 'needs-review' && llmEnabled()) void askLlmForSchema(fp, 'system')
   }
   return schema
 }
@@ -127,7 +145,9 @@ export async function flushSchemaCounts() {
 }
 
 export async function listSchemas() {
-  const rows = await db()<Row[]>`select * from schemas order by (status = 'needs-review') desc, last_seen desc limit 500`
+  const rows = await db()<
+    Row[]
+  >`select * from schemas order by (status = 'needs-review') desc, last_seen desc limit 500`
   return rows.map(fromRow)
 }
 
@@ -144,9 +164,7 @@ async function mutate(fp: string, fn: (s: SchemaRecord, tx: Tx) => Promise<void>
     await fn(s, tx)
     await tx`
       update schemas set name = ${s.name}, mapping = ${tx.json(s.mapping as never)}, mapped_by = ${tx.json(s.mappedBy as never)},
-        confidence = ${tx.json(s.confidence as never)}, proposals = ${tx.json(s.proposals as never)}, status = ${s.status},
-        llm = ${tx.json(s.llm as never)}
-      where fingerprint = ${fp}`
+        confidence = ${tx.json(s.confidence as never)}, proposals = ${tx.json(s.proposals as never)}, status = ${s.status} where fingerprint = ${fp}`
     await publish({ type: 'schema', id: fp }, tx)
     return s
   })
@@ -158,36 +176,13 @@ const recomputeStatus = (s: SchemaRecord) => {
   if (s.status !== 'approved') s.status = schemaStatus(s)
 }
 
-export async function askLlmForSchema(fp: string, actor: string) {
-  const schema = await getSchema(fp)
-  if (!schema || schema.llm.state === 'running') return
-  const missing = CANONICAL_KEYS.filter((k) => !schema.mapping[k] && !schema.proposals.some((p) => p.canonical === k && p.state === 'pending'))
-  const used = new Set(Object.values(schema.mapping))
-  const candidates = schema.fields.filter((f) => !used.has(f.path))
-  if (!missing.length || !candidates.length) {
-    await mutate(fp, (s) => void (s.llm = { state: 'done', detail: 'Nothing left to map', at: Date.now() }))
-    return
-  }
-  await mutate(fp, (s) => void (s.llm = { state: 'running', at: Date.now() }))
-  try {
-    const mappings = await proposeMappings(candidates, missing)
-    await mutate(fp, (s) => {
-      for (const m of mappings) {
-        s.proposals = s.proposals.filter((p) => !(p.canonical === m.canonical && p.state === 'pending'))
-        s.proposals.push({ ...m, by: 'llm', state: 'pending' })
-      }
-      s.llm = { state: 'done', detail: `${mappings.length} proposal(s) from ${llmModel()}`, at: Date.now() }
-      recomputeStatus(s)
-    })
-    await audit(actor, 'schema.llm-proposed', schema.name, `${mappings.length} proposals; sent ${candidates.length} field paths, no values`)
-  } catch (e) {
-    await mutate(fp, (s) => {
-      s.llm = { state: e instanceof LlmUnavailable ? 'disabled' : 'error', detail: (e as Error).message, at: Date.now() }
-    })
-  }
-}
-
-export async function decideProposal(fp: string, canonical: CanonicalKey, path: string, accept: boolean, actor: string) {
+export async function decideProposal(
+  fp: string,
+  canonical: CanonicalKey,
+  path: string,
+  accept: boolean,
+  actor: string
+) {
   let label = ''
   const s = await mutate(fp, (s) => {
     const p = s.proposals.find((x) => x.canonical === canonical && x.path === path && x.state === 'pending')
@@ -198,7 +193,8 @@ export async function decideProposal(fp: string, canonical: CanonicalKey, path: 
       s.mapping[canonical] = path
       s.mappedBy[canonical] = 'human'
       s.confidence[canonical] = 1
-      for (const o of s.proposals) if (o !== p && o.canonical === canonical && o.state === 'pending') o.state = 'rejected'
+      for (const o of s.proposals)
+        if (o !== p && o.canonical === canonical && o.state === 'pending') o.state = 'rejected'
     }
     recomputeStatus(s)
   })

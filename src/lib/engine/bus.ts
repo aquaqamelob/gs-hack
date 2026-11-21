@@ -13,7 +13,6 @@ export async function listen() {
   await db().listen(CHANNEL, (payload) => {
     try {
       const e = JSON.parse(payload) as BusEvent
-      if (e.type === 'llm') rt().llmEnabled = e.enabled
       rt().bus.emit('change', e)
     } catch {
       /* ignore malformed payloads */

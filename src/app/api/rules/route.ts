@@ -1,4 +1,5 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
+import { assertCanEditRule, me } from '@/lib/engine/auth'
 import { audit } from '@/lib/engine/bus'
 import { saveRules } from '@/lib/engine/config'
 import { db } from '@/lib/engine/db'
@@ -8,7 +9,7 @@ import { CANONICAL_KEYS, type FieldInfo, type Rule } from '@/lib/engine/types'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: Request) {
   return handle(async () => {
     const r = rt()
     const fields = new Set<string>(['source', 'schema', ...CANONICAL_KEYS])
@@ -19,6 +20,7 @@ export async function GET() {
       fields: [...fields],
       ops: OP_LABELS,
       recipients: r.recipients.map(({ id, name, kind }) => ({ id, name, kind })),
+      me: me(req),
       runbooks: [...r.runbooks.values()].map(({ id, title, format }) => ({ id, title, format })),
     })
   })
@@ -33,8 +35,12 @@ export async function PUT(req: Request) {
     const err = validateRule(rule)
     if (err) return fail(err)
     const replaceId = body.previousId ?? rule.id
-    const exists = r.rules.some((x) => x.id === replaceId)
+    const previous = r.rules.find((x) => x.id === replaceId)
+    const exists = Boolean(previous)
     if (!exists && r.rules.some((x) => x.id === rule.id)) return fail(`Rule id "${rule.id}" already exists`)
+    if (replaceId !== rule.id && r.rules.some((x) => x.id === rule.id))
+      return fail(`Rule id "${rule.id}" already exists`)
+    assertCanEditRule(me(req, body), rule, previous)
     const clean = JSON.parse(JSON.stringify(rule)) as Rule & { summary?: string }
     delete clean.summary
     saveRules(exists ? r.rules.map((x) => (x.id === replaceId ? clean : x)) : [...r.rules, clean])
@@ -47,7 +53,9 @@ export async function DELETE(req: Request) {
   return handle(async () => {
     const r = rt()
     const id = new URL(req.url).searchParams.get('id')
-    if (!id || !r.rules.some((x) => x.id === id)) return fail('Unknown rule', 404)
+    const previous = r.rules.find((x) => x.id === id)
+    if (!id || !previous) return fail('Unknown rule', 404)
+    assertCanEditRule(me(req), null, previous)
     saveRules(r.rules.filter((x) => x.id !== id))
     await audit(actorOf(req), 'rule.deleted', id)
     return json({ ok: true })

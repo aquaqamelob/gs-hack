@@ -1,6 +1,6 @@
 // Offline evaluation of deterministic schema mapping (layer 1): bun run eval:mapping
 // Each case lists the correct canonical → path mapping. We report how much the rules map on their own,
-// how many fields are left for AI/human, and — most important — how many mappings are wrong.
+// how many fields are left for a human, and — most important — how many mappings are wrong.
 import { describeFields, layer1 } from '../src/lib/engine/schema'
 import type { CanonicalKey } from '../src/lib/engine/types'
 
@@ -206,5 +206,5 @@ const pc = (n: number) => `${Math.round((n / expectedTotal) * 100)}%`
 console.log(`
 Fields to map:          ${expectedTotal}
 Mapped by rules alone:  ${correct} (${pc(correct)})
-Left for AI / human:    ${missing} (${pc(missing)}), of which ${proposedCorrect} already proposed by rules for review
+Left for a human:       ${missing} (${pc(missing)}), of which ${proposedCorrect} already proposed by rules for review
 Wrong mappings:         ${wrong}${wrongList.length ? '\n  ' + wrongList.join('\n  ') : ''}`)

@@ -1,4 +1,6 @@
 # Teams and people. prefs: severity → channels. working_hours: outside them, `outside` replaces the normal channels.
+# People: role admin may change every rule (team filters) and every recipient; others change only their own
+# filters and preferences. teams: whose alerts appear in that person's own view (My view).
 # Events from unmapped schemas that match no rule go to the Unassigned inbox and to default_owner.
 default_owner: team-platform
 recipients:
@@ -37,6 +39,7 @@ recipients:
     kind: person
     email: anna.kowalska@bank.local
     phone: "+48 600 111 222"
+    teams: [team-platform]
     prefs: { critical: [sms], error: [email], warning: [email], info: [ui] }
     working_hours: { from: "08:00", to: "20:00", tz: Europe/Warsaw, outside: [email] }
   - id: piotr
@@ -44,22 +47,32 @@ recipients:
     kind: person
     email: piotr.nowak@bank.local
     phone: "+48 600 333 444"
+    teams: [team-settlements, team-platform]
     prefs: { critical: [phone, sms], error: [sms], warning: [email], info: [ui] }
   - id: marta
     name: Marta Wiśniewska
     kind: person
     email: marta.w@bank.local
     phone: "+48 600 555 666"
+    teams: [team-pricing]
     prefs: { critical: [phone], error: [sms], warning: [ui], info: [ui] }
   - id: tomasz
     name: Tomasz Zieliński
     kind: person
     email: tomasz.z@bank.local
     phone: "+48 600 777 888"
+    teams: [team-rates]
     prefs: { critical: [sms], error: [email], warning: [email], info: [ui] }
   - id: ola
     name: Ola Lewandowska
     kind: person
     email: ola.l@bank.local
     phone: "+48 600 999 000"
+    teams: [counterparty-support]
     prefs: { critical: [phone], error: [sms], warning: [email], info: [email] }
+  - id: admin
+    name: Administrator
+    kind: person
+    role: admin
+    email: alerting-admins@bank.local
+    prefs: { critical: [email, ui], error: [ui], warning: [ui], info: [ui] }

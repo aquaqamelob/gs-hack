@@ -9,13 +9,14 @@ export type AlertSummary = Omit<Alert, 'raw' | 'canonical'>
 export type Metrics = Stats
 
 const ACTOR_KEY = 'gs-alerting.actor'
+const DEFAULT_ACTOR = 'admin'
 
 export function useActor() {
-  const [actor, setActorState] = useState('console-user')
+  const [actor, setActorState] = useState(DEFAULT_ACTOR)
   useEffect(() => {
     const stored = localStorage.getItem(ACTOR_KEY)
     if (stored) setActorState(stored)
-    const onChange = () => setActorState(localStorage.getItem(ACTOR_KEY) || 'console-user')
+    const onChange = () => setActorState(localStorage.getItem(ACTOR_KEY) || DEFAULT_ACTOR)
     window.addEventListener('actor-changed', onChange)
     return () => window.removeEventListener('actor-changed', onChange)
   }, [])
@@ -24,6 +25,23 @@ export function useActor() {
     window.dispatchEvent(new Event('actor-changed'))
   }, [])
   return [actor, setActor] as const
+}
+
+export type Me = { id: string; name: string; role: 'admin' | 'user'; teams: string[]; known: boolean }
+export type Person = { id: string; name: string; role: 'admin' | 'user' }
+
+/** The acting person and their role (role comes from config/recipients.yaml on the server). */
+export function useMe() {
+  const [actor] = useActor()
+  const [data, setData] = useState<{ me: Me; people: Person[] } | null>(null)
+  const load = useCallback(() => {
+    api<{ me: Me; people: Person[] }>('/api/me')
+      .then(setData)
+      .catch(() => setData(null))
+  }, [])
+  useEffect(() => load(), [actor, load])
+  useLive({ onChanged: (k) => k.includes('config:config') && load() })
+  return { me: data?.me ?? null, people: data?.people ?? [], isAdmin: data?.me.role === 'admin', reload: load }
 }
 
 export type Level = 'simple' | 'standard' | 'expert'
@@ -51,7 +69,7 @@ export function useLevel() {
 }
 
 function currentActor() {
-  return (typeof window !== 'undefined' && localStorage.getItem(ACTOR_KEY)) || 'console-user'
+  return (typeof window !== 'undefined' && localStorage.getItem(ACTOR_KEY)) || DEFAULT_ACTOR
 }
 
 export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {

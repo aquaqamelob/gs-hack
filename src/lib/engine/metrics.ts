@@ -1,5 +1,4 @@
 import { db } from './db'
-import { llmEnabled } from './llm'
 import { rt } from './runtime'
 
 export interface LatencyStats {
@@ -24,7 +23,6 @@ export interface Stats {
   dead: number
   retried: number
   endToEnd: Record<'all' | 'phone' | 'sms' | 'email' | 'ui', LatencyStats>
-  llmEnabled: boolean
 }
 
 let cache: { at: number; since: number; value: Stats } | undefined
@@ -73,7 +71,6 @@ export async function stats(sinceMs = Date.now() - 15 * 60_000): Promise<Stats> 
     dead: dl.dead,
     retried: dl.retried,
     endToEnd,
-    llmEnabled: llmEnabled(),
   }
   cache = { at: Date.now(), since: sinceMs, value }
   return value
@@ -94,6 +91,5 @@ export function prometheus() {
     lines.push(`ctrl_${key} ${value}`)
   }
   if (!seen.has('unmapped_events_total')) lines.push('# TYPE ctrl_unmapped_events_total counter', 'ctrl_unmapped_events_total 0')
-  lines.push(`ctrl_llm_enabled ${llmEnabled() ? 1 : 0}`)
   return lines.join('\n') + '\n'
 }
