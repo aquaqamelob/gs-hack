@@ -20,7 +20,7 @@ import {
 import { useState } from 'react'
 import YAML from 'yaml'
 
-export type RuleRow = Rule & { summary: string }
+export type RuleRow = Rule & { summary: string; evalError?: { count: number; message: string; at: number } }
 export type Meta = {
   version: string
   rules: RuleRow[]
@@ -297,7 +297,7 @@ export function RuleEditor({
   const switchTab = (t: 'form' | 'yaml') => {
     setError('')
     if (t === 'yaml') {
-      const { summary: _s, ...clean } = rule as RuleRow
+      const { summary: _s, evalError: _e, ...clean } = rule as RuleRow
       setYamlText(YAML.stringify(clean, { lineWidth: 0 }))
     } else {
       try {

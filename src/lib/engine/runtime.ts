@@ -19,6 +19,7 @@ export interface Runtime {
   actions: Record<string, WebhookAction & { approval?: 'none' | 'required'; description?: string }>
   schemas: Map<string, SchemaRecord>
   counters: Map<string, number>
+  ruleErrors: Map<string, { count: number; message: string }>
   bus: EventEmitter
   booted?: Promise<void>
 }
@@ -41,6 +42,7 @@ export function rt(): Runtime {
       actions: {},
       schemas: new Map(),
       counters: new Map(),
+      ruleErrors: new Map(),
       bus,
     }
   }
@@ -55,7 +57,9 @@ export function count(name: string, by = 1) {
 /** Events fanned out to SSE clients. They arrive via Postgres NOTIFY so every instance sees every change. */
 export type BusEvent =
   | { type: 'alert'; id: string }
+  | { type: 'alerts'; ids: string[] }
   | { type: 'push'; id: string; to: string }
+  | { type: 'pushes'; items: { id: string; to: string }[] }
   | { type: 'schema'; id: string }
   | { type: 'config'; what: string }
   | { type: 'audit' }

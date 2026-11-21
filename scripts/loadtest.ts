@@ -3,6 +3,8 @@
 //   bun run loadtest --rate 1000 --duration 30
 //   bun run loadtest --mode noise         # realistic mix with duplicates: shows noise reduction
 //   BASE_URL=http://host:3000 bun run loadtest
+//   bun run loadtest --channels ui        # leave the SMTP sink out, to measure CTRL's own capacity
+//   scripts/scale-curve.sh                # msg/s and p50/p99 at 1, 2 and 4 replicas, on an isolated stack
 //
 // Requests are fired on a fixed schedule whether or not earlier ones have returned, and HTTP latency is measured
 // from the *scheduled* send time. End-to-end latency (ingest → channel adapter accepted the message) is measured
@@ -21,6 +23,7 @@ const RATE = Number(args.rate ?? 300)
 const DURATION = Number(args.duration ?? 20)
 const MODE = (args.mode ?? 'e2e') as 'e2e' | 'noise'
 const RULE_ID = 'loadtest-e2e'
+const CHANNELS = (args.channels ?? 'ui,email').split(',')
 
 const post = (path: string, body: unknown, method = 'POST') =>
   fetch(BASE + path, {
@@ -98,16 +101,19 @@ async function main() {
           name: 'Load test (temporary)',
           team: 'team-settlements',
           when: { all: [{ field: 'type', op: 'eq', value: 'LOADTEST' }] },
-          notify: [{ to: 'team-settlements', channels: ['ui', 'email'] }],
+          notify: [{ to: 'team-settlements', channels: CHANNELS }],
           present: { title: 'Load test {{seq}}' },
-          group: { by: ['seq'], windowSec: 60, throttleSec: 3600 },
+          group_by: ['seq'],
+          group_wait: '0s',
+          group_interval: '1h',
+          dedup_window: '1h',
         },
       },
       'PUT'
     )
     if (!res.ok) throw new Error(`Cannot create load-test rule: ${await res.text()}`)
   }
-  await post('/api/system', { op: 'reset-metrics' })
+  const since = Date.now()
 
   const total = Math.round(RATE * DURATION)
   const latencies: number[] = []
@@ -153,8 +159,8 @@ async function main() {
   const wall = (performance.now() - start) / 1000
 
   let m: any
-  for (let i = 0; i < 60; i++) {
-    m = await (await fetch(`${BASE}/api/system?only=metrics`)).json()
+  for (let i = 0; i < 240; i++) {
+    m = await (await fetch(`${BASE}/api/system?only=stats&since=${since}`)).json()
     if (m.pending === 0) break
     await new Promise((r) => setTimeout(r, 500))
   }
@@ -177,13 +183,12 @@ async function main() {
       max: r1(latencies[latencies.length - 1] ?? 0),
     },
     server: {
-      ingested: m.ingested,
+      stored: m.events,
       alertsCreated: m.alertsCreated,
       noiseReduction: m.noiseReduction,
-      delivered: m.delivered,
+      delivered: m.endToEnd.all.count,
       pending: m.pending,
       dead: m.dead,
-      processingMs: m.processingMs,
       endToEnd: m.endToEnd,
       instance: m.instance,
     },
@@ -193,13 +198,16 @@ async function main() {
 Sent ${total} events in ${r1(wall)} s → achieved ${result.achievedRate} msg/s (target ${RATE}), ${errors} HTTP errors, max ${maxInflight} in flight
 HTTP accept latency (from scheduled send):  p50 ${result.http.p50} ms   p95 ${result.http.p95} ms   p99 ${result.http.p99} ms   max ${result.http.max} ms
 Ingest → delivery (server-measured, ${m.endToEnd.all.count} deliveries):  p50 ${m.endToEnd.all.p50} ms   p95 ${m.endToEnd.all.p95} ms   p99 ${m.endToEnd.all.p99} ms   max ${m.endToEnd.all.max} ms
-Processing per event (normalise+rules+dedup):  p50 ${m.processingMs.p50} ms   p99 ${m.processingMs.p99} ms
-Events ${m.ingested} → alerts ${m.alertsCreated} (${m.noiseReduction}:1) · delivered ${m.delivered} · pending ${m.pending} · dead ${m.dead}`)
+Events stored ${m.events} of ${total} → alerts ${m.alertsCreated} (${m.noiseReduction}:1) · delivered ${m.endToEnd.all.count} · pending ${m.pending} · dead ${m.dead}`)
 
   mkdirSync('results', { recursive: true })
   const file = `results/loadtest-${MODE}-${RATE}rps-${result.at.replace(/[:.]/g, '-')}.json`
   writeFileSync(file, JSON.stringify(result, null, 2))
   console.log(`\nSaved ${file}`)
+  if (args.row) {
+    const e2e = m.endToEnd.all
+    writeFileSync(args.row, [RATE, result.achievedRate, errors, total - m.events, result.http.p50, result.http.p99, e2e.p50, e2e.p99, m.pending].join('\t'))
+  }
 }
 
 main().catch((e) => {

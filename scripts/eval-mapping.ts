@@ -1,7 +1,7 @@
 // Offline evaluation of deterministic schema mapping (layer 1): bun run eval:mapping
 // Each case lists the correct canonical → path mapping. We report how much the rules map on their own,
 // how many fields are left for a human, and — most important — how many mappings are wrong.
-import { describeFields, layer1 } from '../src/lib/engine/schema'
+import { computeMapping, describeFields } from '../src/lib/engine/schema'
 import type { CanonicalKey } from '../src/lib/engine/types'
 
 type Case = { name: string; event: Record<string, unknown>; expected: Partial<Record<CanonicalKey, string>> }
@@ -20,8 +20,8 @@ const CASES: Case[] = [
       error: { code: 'TIMEOUT', message: 'Counterparty service did not respond in 5000 ms' },
     },
     expected: {
-      type: 'type',
-      entityId: 'workflowId',
+      title: 'type',
+      entity_id: 'workflowId',
       service: 'workflowName',
       severity: 'severity',
       environment: 'environment',
@@ -40,12 +40,11 @@ const CASES: Case[] = [
       status: 'firing',
     },
     expected: {
-      type: 'alertname',
+      title: 'alertname',
       service: 'labels.service',
       severity: 'labels.severity',
       'error.message': 'annotations.summary',
       timestamp: 'startsAt',
-      status: 'status',
     },
   },
   {
@@ -55,10 +54,10 @@ const CASES: Case[] = [
       payload: { tradeId: 'T-998877', desk: 'rates', notional: 25000000, currency: 'EUR', reason: 'LIMIT_BREACH' },
     },
     expected: {
-      type: 'meta.schema',
+      title: 'meta.schema',
       service: 'meta.producer',
       timestamp: 'meta.ts',
-      entityId: 'payload.tradeId',
+      entity_id: 'payload.tradeId',
       'error.code': 'payload.reason',
     },
   },
@@ -87,7 +86,7 @@ const CASES: Case[] = [
     },
     expected: {
       service: 'job_name',
-      entityId: 'run_id',
+      entity_id: 'run_id',
       severity: 'log_level',
       environment: 'env',
       timestamp: 'created_at',
@@ -104,7 +103,7 @@ const CASES: Case[] = [
       time: 1795212000,
       details: { lag: 120000, topic: 'positions' },
     },
-    expected: { type: 'kind', service: 'app', severity: 'priority', environment: 'stage', timestamp: 'time' },
+    expected: { title: 'kind', service: 'app', severity: 'priority', environment: 'stage', timestamp: 'time' },
   },
   {
     name: 'payment stuck (abbreviated names)',
@@ -118,14 +117,14 @@ const CASES: Case[] = [
       paymentRef: 'PAY-2026-118822',
     },
     expected: {
-      type: 'evt_kind',
+      title: 'evt_kind',
       severity: 'lvl',
       service: 'originSystem',
       environment: 'env_name',
       timestamp: 'occurred',
       'error.code': 'details.failure_reason',
       'error.message': 'details.note',
-      entityId: 'paymentRef',
+      entity_id: 'paymentRef',
     },
   },
   {
@@ -147,10 +146,10 @@ const CASES: Case[] = [
       body: { orderId: 'ORD-55821', rejectCode: 'INSUFFICIENT_MARGIN', text: 'Order rejected: insufficient margin' },
     },
     expected: {
-      type: 'header.eventType',
+      title: 'header.eventType',
       service: 'header.source',
       timestamp: 'header.sentAt',
-      entityId: 'body.orderId',
+      entity_id: 'body.orderId',
       'error.code': 'body.rejectCode',
       'error.message': 'body.text',
     },
@@ -176,7 +175,7 @@ const wrongList: string[] = []
 
 for (const c of CASES) {
   const fields = describeFields(c.event)
-  const r = layer1(c.event, fields)
+  const r = computeMapping(c.event, fields)
   const line: string[] = []
   for (const [key, path] of Object.entries(c.expected) as [CanonicalKey, string][]) {
     expectedTotal++

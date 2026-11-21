@@ -1,0 +1,8 @@
+# Overlay for scripts/scale-curve.sh: same services, no published ports, so it runs beside the demo stack
+# under its own project name and its own database volume.
+services:
+  postgres: { ports: !reset [] }
+  redpanda: { ports: !reset [] }
+  mailhog: { ports: !reset [] }
+  mock-gateway: { ports: !reset [] }
+  lb: { ports: !reset [] }

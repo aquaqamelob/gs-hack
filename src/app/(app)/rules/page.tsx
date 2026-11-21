@@ -43,7 +43,7 @@ export default function RulesPage() {
   }
   const toggle = (r: Rule) =>
     run(() => {
-      const { summary: _s, ...clean } = r as RuleRow
+      const { summary: _s, evalError: _e, ...clean } = r as RuleRow
       return api('/api/rules', { method: 'PUT', body: { rule: { ...clean, enabled: r.enabled === false }, version: meta.version } })
     })
   const remove = (r: Rule) =>
@@ -109,7 +109,13 @@ export default function RulesPage() {
                     {kindOf.get(r.team) === 'person' ? `personal: ${r.team}` : r.team}
                   </Badge>
                   {r.runbook && <Badge color="sky">runbook: {r.runbook}</Badge>}
+                  {r.evalError && <Badge color="red">evaluation error ×{r.evalError.count}</Badge>}
                 </div>
+                {r.evalError && (
+                  <p className="mt-1 text-sm text-red-700 dark:text-red-400">
+                    This rule could not be fully checked, so it may miss events. Last error: {r.evalError.message}
+                  </p>
+                )}
                 <RuleSummary r={r} />
               </div>
               {isAdmin && (

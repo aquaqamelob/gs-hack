@@ -48,9 +48,10 @@ function cachedRegex(key: string, make: () => RegExp) {
   return r
 }
 
-export function evaluate(cond: Condition, ev: EventView): boolean {
-  if ('all' in cond) return cond.all.every((c) => evaluate(c, ev))
-  if ('any' in cond) return cond.any.some((c) => evaluate(c, ev))
+/** A condition that cannot run counts as false, so one bad branch of an `any` does not silence the others; `onError` reports it. */
+export function evaluate(cond: Condition, ev: EventView, onError?: (e: unknown) => void): boolean {
+  if ('all' in cond) return cond.all.every((c) => evaluate(c, ev, onError))
+  if ('any' in cond) return cond.any.some((c) => evaluate(c, ev, onError))
   const v = resolveField(ev, cond.field)
   switch (cond.op) {
     case 'eq':
@@ -74,7 +75,8 @@ export function evaluate(cond: Condition, ev: EventView): boolean {
     case 'regex':
       try {
         return v !== undefined && v !== null && cachedRegex(`r:${cond.value}`, () => new RegExp(String(cond.value), 'i')).test(String(v))
-      } catch {
+      } catch (e) {
+        onError?.(e)
         return false
       }
     case 'exists': {

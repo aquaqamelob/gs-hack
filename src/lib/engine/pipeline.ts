@@ -1,7 +1,7 @@
 import { alertFields, alertFromRow, resolveAlert } from './alerts'
-import { publish } from './bus'
+import { publishAlerts } from './bus'
 import { db, type Tx } from './db'
-import { insertDeliveries, planDeliveries, unassignedRule, UNASSIGNED_TEAM } from './outbox'
+import { insertDeliveries, planDeliveries, unassignedRule, UNASSIGNED_TEAM, wakeOutboxes } from './outbox'
 import { evaluate, groupSettings, resolveField } from './rules'
 import { count, rt } from './runtime'
 import { asJson, normalize } from './schema'
@@ -28,6 +28,24 @@ export function expand(payload: unknown): unknown[] {
   return [payload]
 }
 
+function recordRuleError(rule: Rule, e: unknown) {
+  count(`rule_errors_total{rule="${rule.id}"}`)
+  const errors = rt().ruleErrors
+  errors.set(rule.id, { count: (errors.get(rule.id)?.count ?? 0) + 1, message: String((e as Error)?.message ?? e).slice(0, 300) })
+}
+
+/** Written in the background, so a broken rule adds no queries to the ingest path. */
+export async function flushRuleErrors() {
+  const errors = rt().ruleErrors
+  if (!errors.size) return
+  const rows = [...errors].map(([rule_id, x]) => ({ rule_id, count: x.count, last_error: x.message }))
+  errors.clear()
+  await db()`
+    insert into rule_errors (rule_id, count, last_error)
+    select rule_id, count, last_error from jsonb_to_recordset(${db().json(rows as never)}::jsonb) as x(rule_id text, count bigint, last_error text)
+    on conflict (rule_id) do update set count = rule_errors.count + excluded.count, last_error = excluded.last_error, last_at = now()`
+}
+
 async function prepare(payload: unknown, source: string, receivedAt: number): Promise<Prepared> {
   const raw = asJson(payload)
   const schema = await observeSchema(raw, source)
@@ -35,8 +53,9 @@ async function prepare(payload: unknown, source: string, receivedAt: number): Pr
   const rules = rt().rules.filter((r) => {
     if (r.enabled === false) return false
     try {
-      return evaluate(r.when, ev)
-    } catch {
+      return evaluate(r.when, ev, (e) => recordRuleError(r, e))
+    } catch (e) {
+      recordRuleError(r, e)
       return false
     }
   })
@@ -128,6 +147,7 @@ interface GroupOp {
   n: number
   resolve: boolean
   members: Prepared[]
+  queuedDelivery?: boolean
 }
 
 export function dedupKey(rule: Rule, ev: EventView) {
@@ -264,6 +284,7 @@ async function upsert(tx: Tx, op: GroupOp): Promise<string> {
       a.notifySeq = 1
       const reason = a.team === UNASSIGNED_TEAM ? 'unassigned' : 'new'
       await insertDeliveries(tx, planDeliveries(a, op.rule, reason, op.first.receivedAt))
+      op.queuedDelivery = true
     }
   } else {
     count('events_deduplicated_total', op.n)
@@ -303,9 +324,10 @@ async function writeBatch(items: Prepared[]) {
     if (!p.rules.length) count('events_unrouted_total')
   }
 
+  const touched = new Set<string>()
   await db().begin(async (tx) => {
+    touched.clear()
     for (const p of items) p.alertIds = []
-    const touched = new Set<string>()
     // Consistent lock order across instances: sort by dedup key.
     for (const key of [...ops.keys()].sort()) {
       for (const op of ops.get(key)!) {
@@ -334,6 +356,7 @@ async function writeBatch(items: Prepared[]) {
         'matched',
         'alertIds'
       )}`
-    for (const id of touched) await publish({ type: 'alert', id }, tx)
   })
+  const queued = [...ops.values()].some((list) => list.some((op) => op.queuedDelivery))
+  await Promise.all([publishAlerts(touched), queued ? wakeOutboxes() : undefined])
 }
