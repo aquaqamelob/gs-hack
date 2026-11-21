@@ -735,9 +735,9 @@ function SchemaDetail({
       </div>
 
       <div className="rounded-lg bg-zinc-50 p-4 text-sm dark:bg-zinc-800/50">
-        <strong>How this works:</strong> computed once per schema and stored. 1) Deterministic: names, synonyms, value
-        formats, known formats like Alertmanager. 2) Fuzzy tiebreak: similar names, only when the distinguishing word
-        matches. Uncertain proposals wait for a human ✓. Raw paths always work in rules.
+        <strong>How this works:</strong> the first time a new kind of event arrives, CTRL guesses which of its fields is
+        the title, the severity, the service and so on, from field names and values (no AI). Sure guesses are used right
+        away; unsure ones wait here for a person to accept. Rules can also use any field by its original name.
       </div>
 
       <Proposals
@@ -865,7 +865,7 @@ function SchemasBody({
         <div>
           <Heading>Sources & schemas</Heading>
           <Text>
-            {'Every new event shape is detected automatically from Redpanda topics and POST /ingest/<source>. Unknown schemas are never rejected; until mapped, their events land in the Unassigned inbox.'}
+            {'Every new kind of event is recognised automatically, whichever way it arrives. Nothing is rejected: until a schema is mapped, its events go to the Unassigned inbox so a person can look at them.'}
           </Text>
         </div>
         <Button color="dark/zinc" onClick={() => setAdding(!adding)}>
@@ -894,7 +894,7 @@ function SchemasBody({
             </p>
           )}
           <ul className="space-y-1">
-            {data.schemas.map((s) => (
+            {data.schemas.map((s, _, all) => (
               <li key={s.fingerprint}>
                 <button
                   onClick={() => setSelected(s.fingerprint)}
@@ -902,10 +902,14 @@ function SchemasBody({
                 >
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">{s.name}</span>
+                    {/* Two shapes can share a name (same event type, different fields): tell them apart. */}
+                    {all.some((o) => o.name === s.name && o.fingerprint !== s.fingerprint) && (
+                      <span className="shrink-0 font-mono text-xs text-zinc-500">{s.fingerprint.slice(0, 6)}</span>
+                    )}
                     {s.status === 'needs-review' && <span className="size-2 shrink-0 rounded-full bg-amber-500" />}
                   </div>
                   <div className="text-xs text-zinc-500">
-                    {s.source} · {s.eventCount.toLocaleString()} events ·{' '}
+                    {s.source} · {s.eventCount.toLocaleString()} event{s.eventCount === 1 ? '' : 's'} ·{' '}
                     {keys.all.filter((k) => s.mapping[k]).length}/{keys.all.length} mapped
                   </div>
                 </button>

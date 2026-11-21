@@ -7,7 +7,7 @@ import { count, rt } from './runtime'
 import { asJson, normalize } from './schema'
 import { observeSchema } from './schemas'
 import type { Alert, AlertStep, Canonical, EventView, Json, Rule, Runbook, SchemaRecord, Severity } from './types'
-import { newApprovalCode, newId, render, renderDeep, shortHash } from './util'
+import { newApprovalCode, newId, render, renderDeep, renderText, shortHash } from './util'
 
 const SEVERITY_COLOR: Record<Severity, string> = { critical: 'red', error: 'orange', warning: 'amber', info: 'sky' }
 
@@ -182,11 +182,11 @@ export function draftAlert(rule: Rule, ev: Prepared, n: number): Alert {
   const unassigned = rule.team === UNASSIGNED_TEAM
   const title = unassigned
     ? `Unmapped event from ${ev.source}: ${ev.schema.name}`
-    : render(rule.present?.title ?? '', fields).trim() || defaultTitle(ev.canonical, ev.schemaName)
+    : renderText(rule.present?.title ?? '', fields) || defaultTitle(ev.canonical, ev.schemaName)
   base.title = title
   const body = unassigned
     ? `No rule matched and the schema is not mapped yet. Map it so rules can use its fields.`
-    : render(rule.present?.body ?? '{{error.message}}', fields).trim()
+    : renderText(rule.present?.body ?? '{{error.message}}', fields)
   const runbook = unassigned ? undefined : findRunbook(rule, ev)
   const steps: AlertStep[] = (runbook?.steps ?? []).map((st) => ({
     ...st,

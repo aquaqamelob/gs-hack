@@ -39,7 +39,7 @@ rules:
         channels: [ui]
     present:
       title: "Pricing latency on {{instrument}}"
-      body: "{{error.message}} — {{latency_ms | default:n/a}} ms on {{service}}"
+      body: "{{error.message}} — {{latency_ms}} ms on {{service}}"
       fields: [instrument, latency_ms, service]
       color: amber
     group_by: [instrument]

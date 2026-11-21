@@ -513,11 +513,15 @@ export function normalize(raw: unknown, schema: Pick<SchemaRecord, 'mapping' | '
 
 export function schemaName(raw: unknown, source: string, mapping: MappingResult) {
   if (mapping.knownFormat) return mapping.knownFormat
+  // A title that is an event type (WORKFLOW_FAILED, trade.rejected.v2) names the schema well. A sentence
+  // ("Disk usage > 90% on db-replica-2") describes one event, not the shape, so it is not used.
   const titleValue = mapping.mapping.title ? getPath(raw, mapping.mapping.title) : undefined
-  if (typeof titleValue === 'string' && titleValue.length < 60) return titleValue
-  if (source === 'logs' || source === 'log') {
-    const svc = mapping.mapping.service ? getPath(raw, mapping.mapping.service) : undefined
-    if (typeof svc === 'string') return `log:${svc.replace(/[-_]?\d+$/, '-*')}`
+  if (typeof titleValue === 'string' && titleValue.length < 60 && !/\s/.test(titleValue)) return titleValue
+  const svc = mapping.mapping.service ? getPath(raw, mapping.mapping.service) : undefined
+  if (typeof svc === 'string' && svc) {
+    // Numbered instances share a schema: pricing-engine-3 → pricing-engine-*
+    const service = svc.replace(/[-_]?\d+$/, '-*')
+    return source === 'logs' || source === 'log' ? `log:${service}` : `${source}:${service}`
   }
   return `${source}-schema`
 }

@@ -28,6 +28,24 @@ export function useActor() {
 }
 
 export type Me = { id: string; name: string; role: 'admin' | 'user'; teams: string[]; known: boolean }
+/** "team-settlements" → "Team Settlements": a readable label for a team or person id. */
+export function idLabel(id: string) {
+  return id
+    .split(/[-_]/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+/** "error.message" → "Error message", "workflowId" → "Workflow ID": a readable label for a field path. */
+export function fieldLabel(path: string) {
+  const words = path
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[.\s_-]+/)
+    .map((w) => (w.toLowerCase() === 'id' ? 'ID' : w.toLowerCase()))
+  const text = words.join(' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 export type Person = { id: string; name: string; role: 'admin' | 'user' }
 
 /** The acting person and their role (role comes from the recipients config on the server). */

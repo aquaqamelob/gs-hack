@@ -58,6 +58,31 @@ export function render(template: string, resolve: (path: string) => unknown): st
   })
 }
 
+const MISSING = '\u0000'
+
+/**
+ * Like `render`, for text people read (alert titles and bodies). When an event lacks a field, the words that only
+ * made sense around it go too, instead of leaving "failed at : X" or "payments-api ()":
+ *   - a " — " part that contains a missing value is dropped
+ *   - "(missing)" is dropped, and so is a preposition right before a missing value ("at missing")
+ */
+export function renderText(template: string, resolve: (path: string) => unknown): string {
+  const marked = render(template, (path) => {
+    const v = resolve(path)
+    return v === undefined || v === null || v === '' ? MISSING : v
+  })
+  const parts = marked.split(' — ')
+  const complete = parts.filter((part) => !part.includes(MISSING))
+  return (parts.length > 1 && complete.length ? complete : parts)
+    .join(' — ')
+    .replace(/\s*\(\s*\u0000\s*\)/g, '')
+    .replace(/\s+(?:at|on|in|for|by|from|of)\s+\u0000/gi, '')
+    .replaceAll(MISSING, '')
+    .replace(/\s+([:,.)])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 export function renderDeep(value: Json, resolve: (path: string) => unknown): Json {
   if (typeof value === 'string') return render(value, resolve)
   if (Array.isArray(value)) return value.map((v) => renderDeep(v, resolve))

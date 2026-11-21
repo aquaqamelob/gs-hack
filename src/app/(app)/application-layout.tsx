@@ -24,6 +24,7 @@ import {
   UserCircleIcon,
   UsersIcon,
 } from '@heroicons/react/20/solid'
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const NAV = [
@@ -75,23 +76,22 @@ function LiveIndicator() {
     <div className="space-y-1 px-2 text-xs/5 text-zinc-500 dark:text-zinc-400">
       <div className="flex items-center gap-2">
         <span className={`size-2 rounded-full ${connected ? 'animate-pulse bg-green-500' : 'bg-zinc-400'}`} />
-        {connected ? 'Live (server push)' : 'Connecting…'}
+        {connected ? 'Live' : 'Connecting…'}
       </div>
+      {/* Latency percentiles and the instance id are on System & audit; the sidebar only says what needs attention. */}
       {m && (
         <>
           <div>
-            {m.events.toLocaleString()} events → {m.alertsCreated.toLocaleString()} alerts (15 min)
-          </div>
-          <div>
-            e2e p50 {m.endToEnd.all.p50} ms · p99 {m.endToEnd.all.p99} ms
+            Last 15 min: {m.events.toLocaleString()} events, {m.alertsCreated.toLocaleString()} alerts
           </div>
           {m.pending > 0 && (
-            <div className="font-medium text-amber-600 dark:text-amber-400">{m.pending} deliveries retrying</div>
+            <div className="font-medium text-amber-600 dark:text-amber-400">{m.pending} messages being retried</div>
           )}
           {m.dead > 0 && (
-            <div className="font-medium text-red-600 dark:text-red-400">{m.dead} in dead-letter queue</div>
+            <Link href="/system" className="block font-medium text-red-600 underline dark:text-red-400">
+              {m.dead} messages could not be sent
+            </Link>
           )}
-          <div className="truncate">instance {m.instance}</div>
         </>
       )}
     </div>

@@ -8,7 +8,7 @@ import { Select } from '@/components/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/table'
 import { Text } from '@/components/text'
 import { Textarea } from '@/components/textarea'
-import { COLOR_BAR, COLOR_TEXT, SEVERITY_BADGE, api, timeAgo, useLive, useNow } from '@/lib/client'
+import { COLOR_BAR, COLOR_TEXT, SEVERITY_BADGE, api, fieldLabel, idLabel, timeAgo, useLive, useNow } from '@/lib/client'
 import type { Alert, AlertStep, AuditEntry, Delivery, Runbook } from '@/lib/engine/types'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
@@ -187,7 +187,7 @@ export default function AlertPage({ params }: { params: { id: string } }) {
             {alert.status}
           </Badge>
           <span className="text-sm text-zinc-500">
-            first {timeAgo(alert.firstSeen, now)} · last {timeAgo(alert.lastSeen, now)} · {alert.team}
+            first {timeAgo(alert.firstSeen, now)} · last {timeAgo(alert.lastSeen, now)} · {idLabel(alert.team)}
           </span>
         </div>
         <Heading className={`mt-3 ${COLOR_TEXT[alert.color] ?? ''}`}>{alert.title}</Heading>
@@ -197,7 +197,9 @@ export default function AlertPage({ params }: { params: { id: string } }) {
           <p>{PLAIN_SEVERITY[alert.severity]}</p>
           {alert.body && <p className="text-zinc-700 dark:text-zinc-300">{alert.body}</p>}
           <p className="text-zinc-600 dark:text-zinc-400">
-            {alert.ackedBy ? `${alert.ackedBy} is on it.` : `Sent to ${alert.team}; nobody has acknowledged it yet.`}
+            {alert.ackedBy
+              ? `${alert.ackedBy} is on it.`
+              : `Sent to ${idLabel(alert.team)}; nobody has acknowledged it yet.`}
             {nextStep && !closed && (
               <>
                 {' '}
@@ -223,7 +225,7 @@ export default function AlertPage({ params }: { params: { id: string } }) {
           <dl className="mt-5 grid gap-x-6 gap-y-2 sm:grid-cols-3">
             {alert.fields.map((f) => (
               <div key={f.label}>
-                <dt className="text-xs text-zinc-500">{f.label}</dt>
+                <dt className="text-xs text-zinc-500">{fieldLabel(f.label)}</dt>
                 <dd className="font-medium break-words">{f.value}</dd>
               </div>
             ))}

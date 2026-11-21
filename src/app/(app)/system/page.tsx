@@ -45,7 +45,7 @@ export default function SystemPage() {
       <Heading>System & audit</Heading>
       <Text>
         Measured from Postgres over the last {Math.round(m.windowSec / 60)} minutes, across all instances. This page is
-        served by <code>{data.instance}</code>. Reproducible numbers: <code>loadtest/</code>.
+        served by <code>{data.instance}</code>. Reproduce the numbers with <code>bun run loadtest</code>.
       </Text>
 
       <section className="mt-8">
@@ -97,8 +97,8 @@ export default function SystemPage() {
           ))}
         </div>
         <Text className="mt-2">
-          Kill the SMS gateway or an app instance (<code>chaos/</code>): deliveries stay in the outbox and retry with
-          backoff.
+          If the SMS gateway or an app instance goes down, deliveries stay in the outbox and are retried with backoff.
+          Try it with <code>bun run chaos</code>.
         </Text>
       </section>
 

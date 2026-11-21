@@ -61,8 +61,8 @@ export default function RulesPage() {
         <div>
           <Heading>Rules</Heading>
           <Text>
-            Each rule decides which events become alerts, who is told and how the alert looks. Stored in Postgres
-            (seeded from <code>config/rules.yaml</code> on first boot); a save reaches every instance within seconds.{' '}
+            Each rule decides which events become alerts, who is told and how the alert looks. A saved change applies
+            everywhere within seconds, with no restart.{' '}
             <a className="underline" href="/api/rules/export">
               Export as YAML
             </a>

@@ -6,7 +6,7 @@ import { Input } from '@/components/input'
 import { Select } from '@/components/select'
 import { Text } from '@/components/text'
 import { Textarea } from '@/components/textarea'
-import { COLOR_BAR, SEVERITY_BADGE, api, timeAgo, useLive, useMetrics, useNow, type AlertSummary } from '@/lib/client'
+import { COLOR_BAR, SEVERITY_BADGE, api, idLabel, timeAgo, useLive, useMetrics, useNow, type AlertSummary } from '@/lib/client'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
@@ -133,7 +133,7 @@ function AlertCard({ a, now, flash, onAction }: { a: AlertSummary; now: number; 
           {a.count > 1 && <Badge color="zinc">×{a.count.toLocaleString()}</Badge>}
           <StatusBadge a={a} />
           <span className="text-xs text-zinc-500">
-            {`${a.team} · ${a.ruleName} · ${timeAgo(a.lastSeen, now)}`}
+            {`${idLabel(a.team)} · ${a.ruleName} · ${timeAgo(a.lastSeen, now)}`}
           </span>
         </div>
         <Link href={`/alerts/${a.id}`} className="mt-1 block text-base/6 font-semibold hover:underline">
@@ -176,7 +176,7 @@ function AlertLine({ a, now, flash, onAction }: { a: AlertSummary; now: number; 
       <Link href={`/alerts/${a.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">
         {a.title}
       </Link>
-      <span className="hidden w-32 truncate text-xs text-zinc-500 md:block">{a.team}</span>
+      <span className="hidden w-32 truncate text-xs text-zinc-500 md:block">{idLabel(a.team)}</span>
       <StatusBadge a={a} />
       <span className="w-16 shrink-0 text-right text-xs text-zinc-500">{timeAgo(a.lastSeen, now)}</span>
       <span className="flex w-36 shrink-0 justify-end gap-1">
@@ -223,6 +223,7 @@ export default function Feed() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [demo, setDemo] = useState(false)
   const [flash, setFlash] = useState<Set<string>>(new Set())
+  const [loaded, setLoaded] = useState(false)
   const m = useMetrics()
   const now = useNow(5000)
 
@@ -245,7 +246,7 @@ export default function Feed() {
     setAlerts(new Map(r.alerts.map((a) => [a.id, a])))
   }, [])
   useEffect(() => {
-    void load()
+    void load().finally(() => setLoaded(true))
   }, [load])
 
   useLive({
@@ -319,7 +320,8 @@ export default function Feed() {
           <div className="flex items-baseline gap-3">
             <h1 className="text-2xl/8 font-semibold sm:text-xl/8">Live alerts</h1>
             <span className="text-sm text-zinc-500">
-              {`${(m?.events ?? 0).toLocaleString()} events → ${(m?.alertsCreated ?? 0).toLocaleString()} alerts (15 min) · ${m?.noiseReduction ? `${m.noiseReduction}:1 noise reduction` : '—'} · ${m?.openAlerts ?? 0} open`}
+              {`${m?.openAlerts ?? 0} open · last 15 min: ${(m?.events ?? 0).toLocaleString()} events became ${(m?.alertsCreated ?? 0).toLocaleString()} alerts`}
+              {m?.noiseReduction ? ` (${Math.round(m.noiseReduction)}× fewer)` : ''}
             </span>
           </div>
           <div className="flex gap-2">
@@ -344,7 +346,7 @@ export default function Feed() {
             <option value="">All teams</option>
             {teams.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {idLabel(t)}
               </option>
             ))}
           </Select>
@@ -427,7 +429,8 @@ export default function Feed() {
             </section>
           )
         })}
-        {visible.length === 0 && (
+        {!loaded && <div className="p-10 text-center text-sm text-zinc-500">Loading alerts…</div>}
+        {loaded && visible.length === 0 && (
           <div className="rounded-xl border border-zinc-950/10 p-10 text-center text-sm text-zinc-500 dark:border-white/10">
             {query ? 'No alerts match your search.' : 'No alerts. Click “Send test events” above, or POST any JSON to /ingest/<source>.'}
           </div>

@@ -5,7 +5,7 @@ import { dedupKey } from '@/lib/engine/pipeline'
 import { evaluate, resolveField, validateRule } from '@/lib/engine/rules'
 import { rt } from '@/lib/engine/runtime'
 import type { Canonical, EventView, Json, Rule } from '@/lib/engine/types'
-import { render } from '@/lib/engine/util'
+import { renderText } from '@/lib/engine/util'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
       hits.push({ at: ms(row.receivedAt)!, ev })
       groups.add(dedupKey({ ...rule, id: rule.id || 'preview' }, ev))
       if (samples.length < 5) {
-        const title = render(rule.present?.title ?? '{{title}} on {{service}}', (p) => resolveField(ev, p))
+        const title = renderText(rule.present?.title ?? '{{title}} on {{service}}', (p) => resolveField(ev, p))
         samples.push({ id: String(row.id), schema: ev.schemaName, title, at: ms(row.receivedAt)! })
       }
     }
