@@ -14,7 +14,8 @@ export async function listen() {
     try {
       const e = JSON.parse(payload) as BusEvent
       if (e.type === 'llm') rt().llmEnabled = e.enabled
-      rt().bus.emit('change', e)
+      // Config changes are re-emitted as 'change' by boot once this instance has reloaded them.
+      rt().bus.emit(e.type === 'config' ? 'config' : 'change', e)
     } catch {
       /* ignore malformed payloads */
     }

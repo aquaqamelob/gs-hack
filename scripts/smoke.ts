@@ -187,5 +187,28 @@ check(
   later.map((g: any) => g.deliveries.length).join(',')
 )
 
+// 11. Rules live in Postgres: a save reaches every replica behind the load balancer (run with APP_REPLICAS=3).
+const ruleId = `smoke-consistency-${run}`
+await fetch(`${B}/api/rules`, {
+  method: 'PUT',
+  headers: { 'content-type': 'application/json', 'x-actor': 'smoke-test' },
+  body: JSON.stringify({
+    rule: { id: ruleId, name: `Smoke ${run}`, team: 'team-platform', when: { field: 'title', op: 'eq', value: `NEVER-${run}` }, notify: [{ to: 'team-platform', channels: ['ui'] }] },
+  }),
+})
+const saved = Date.now()
+// Round-robin across replicas: 10 consecutive GETs that all see the rule, reached within 2 s of the save.
+let streak = 0
+let gets = 0
+while (streak < 10 && Date.now() - saved < 2000) {
+  const data = (await (await fetch(`${B}/api/rules`)).json()) as any
+  gets++
+  streak = data.rules.some((r: any) => r.id === ruleId) ? streak + 1 : 0
+}
+check('new rule returned by 10 consecutive GETs through the load balancer within 2 s', streak >= 10, `${gets} GETs, ${Date.now() - saved} ms`)
+const exported = await (await fetch(`${B}/api/rules/export`)).text()
+check('GET /api/rules/export returns the rules as YAML', exported.startsWith('rules:') && exported.includes(`id: ${ruleId}`))
+await fetch(`${B}/api/rules?id=${ruleId}`, { method: 'DELETE', headers: { 'x-actor': 'smoke-test' } })
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
 process.exit(failures ? 1 : 0)

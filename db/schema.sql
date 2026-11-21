@@ -126,3 +126,13 @@ CREATE TABLE IF NOT EXISTS reply_failures (
   at     timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS reply_failures_sender_at ON reply_failures (sender, at);
+
+-- Runtime-editable config (rules, recipients, runbooks). Seeded from config/*.yaml when empty; every instance
+-- caches it in memory and reloads on a pg_notify 'config' event (plus a periodic version check as a fallback).
+-- ids: 'rules' {rules: [...]}, 'recipients' {default_owner, recipients: [...]}, 'runbook:<id>' {file, format, content}.
+CREATE TABLE IF NOT EXISTS config_docs (
+  id         text PRIMARY KEY,
+  doc        jsonb       NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text        NOT NULL
+);
