@@ -62,7 +62,13 @@ export function simulateBudget(rule: Rule, events: { at: number; ev: EventView }
     for (const d of planDeliveries(alert, rule, reason, at, at)) {
       const key = `${d.recipient}:${d.channel}`
       const r = findRecipient(d.recipient)
-      const line = lines.get(key) ?? { recipient: d.recipient, name: r?.name ?? d.recipient, channel: d.channel, count: 0, outsideHours: 0 }
+      const line = lines.get(key) ?? {
+        recipient: d.recipient,
+        name: r?.name ?? d.recipient,
+        channel: d.channel,
+        count: 0,
+        outsideHours: 0,
+      }
       line.count++
       if (r?.working_hours && !insideWorkingHours(r, at)) line.outsideHours++
       lines.set(key, line)
@@ -109,6 +115,8 @@ export function simulateBudget(rule: Rule, events: { at: number; ev: EventView }
     notifications,
     from: sorted[0]?.at ?? null,
     to: sorted.at(-1)?.at ?? null,
-    lines: [...lines.values()].sort((a, b) => (a.channel === 'ui' ? 1 : 0) - (b.channel === 'ui' ? 1 : 0) || b.count - a.count),
+    lines: [...lines.values()].sort(
+      (a, b) => (a.channel === 'ui' ? 1 : 0) - (b.channel === 'ui' ? 1 : 0) || b.count - a.count
+    ),
   }
 }

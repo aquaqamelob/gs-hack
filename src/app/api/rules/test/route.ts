@@ -19,17 +19,35 @@ export async function POST(req: Request) {
   return handle(async () => {
     const { rule } = await readJson<{ rule?: Rule }>(req)
     if (!rule?.when) return fail('rule.when is required')
-    const err = validateRule({ ...rule, notify: rule.notify ?? [], id: rule.id || 'preview', name: rule.name || 'preview', team: rule.team || 'preview' })
+    const err = validateRule({
+      ...rule,
+      notify: rule.notify ?? [],
+      id: rule.id || 'preview',
+      name: rule.name || 'preview',
+      team: rule.team || 'preview',
+    })
     if (err) return fail(err)
-    const rows = await db()<{ id: string; receivedAt: Date; source: string; schemaFp: string; raw: Json; canonical: Canonical }[]>`
+    const rows = await db()<
+      { id: string; receivedAt: Date; source: string; schemaFp: string; raw: Json; canonical: Canonical }[]
+    >`
       select id, received_at, source, schema_fp, raw, canonical from events order by id desc limit ${PREVIEW_EVENTS}`
-    const names = new Map((await db()<{ fingerprint: string; name: string }[]>`select fingerprint, name from schemas`).map((s) => [s.fingerprint, s.name]))
+    const names = new Map(
+      (await db()<{ fingerprint: string; name: string }[]>`select fingerprint, name from schemas`).map((s) => [
+        s.fingerprint,
+        s.name,
+      ])
+    )
     const samples: { id: string; schema: string; title: string; at: number }[] = []
     const groups = new Set<string>()
     const hits: { at: number; ev: EventView }[] = []
     let matched = 0
     for (const row of rows) {
-      const ev: EventView = { source: row.source, schemaName: names.get(row.schemaFp) ?? row.schemaFp, raw: row.raw, canonical: row.canonical }
+      const ev: EventView = {
+        source: row.source,
+        schemaName: names.get(row.schemaFp) ?? row.schemaFp,
+        raw: row.raw,
+        canonical: row.canonical,
+      }
       if (!evaluate(rule.when, ev)) continue
       matched++
       hits.push({ at: ms(row.receivedAt)!, ev })
@@ -40,7 +58,23 @@ export async function POST(req: Request) {
       }
     }
     const existing = rt().rules.find((r) => r.id === rule.id)
-    const budget = simulateBudget({ ...rule, id: rule.id || 'preview', name: rule.name || 'preview', team: rule.team || 'preview', notify: rule.notify ?? [] }, hits)
-    return json({ tested: rows.length, matched, alerts: groups.size, samples, replaces: existing ? existing.name : null, budget })
+    const budget = simulateBudget(
+      {
+        ...rule,
+        id: rule.id || 'preview',
+        name: rule.name || 'preview',
+        team: rule.team || 'preview',
+        notify: rule.notify ?? [],
+      },
+      hits
+    )
+    return json({
+      tested: rows.length,
+      matched,
+      alerts: groups.size,
+      samples,
+      replaces: existing ? existing.name : null,
+      budget,
+    })
   })
 }

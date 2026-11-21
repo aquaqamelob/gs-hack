@@ -46,7 +46,10 @@ export default function RulesPage() {
   const toggle = (r: Rule) =>
     run(() => {
       const { summary: _s, ...clean } = r as RuleRow
-      return api('/api/rules', { method: 'PUT', body: { rule: { ...clean, enabled: r.enabled === false }, version: meta.version } })
+      return api('/api/rules', {
+        method: 'PUT',
+        body: { rule: { ...clean, enabled: r.enabled === false }, version: meta.version },
+      })
     })
   const remove = (r: Rule) =>
     confirm(`Delete rule “${r.name}”?`) &&

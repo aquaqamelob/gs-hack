@@ -5,14 +5,17 @@
 export const args: Record<string, string> = Object.fromEntries(
   process.argv
     .slice(2)
-    .reduce<[string, string][]>((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1] ?? '']] : acc), [])
+    .reduce<
+      [string, string][]
+    >((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1] ?? '']] : acc), [])
 )
 
 export const BASE = (process.env.BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 /** Service identity for config writes made by the scripts. */
 export const ADMIN_HEADERS = { 'content-type': 'application/json', 'x-actor': 'admin' }
 
-export const pct = (xs: number[], p: number) => (xs.length ? xs[Math.min(xs.length - 1, Math.ceil((p / 100) * xs.length) - 1)] : 0)
+export const pct = (xs: number[], p: number) =>
+  xs.length ? xs[Math.min(xs.length - 1, Math.ceil((p / 100) * xs.length) - 1)] : 0
 export const r1 = (n: number) => Math.round(n * 10) / 10
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -90,7 +93,12 @@ export async function openLoad(opts: {
     wallSec: r1(wallSec),
     achievedRate: r1(total / wallSec),
     maxInflight,
-    http: { p50: r1(pct(latencies, 50)), p95: r1(pct(latencies, 95)), p99: r1(pct(latencies, 99)), max: r1(latencies.at(-1) ?? 0) },
+    http: {
+      p50: r1(pct(latencies, 50)),
+      p95: r1(pct(latencies, 95)),
+      p99: r1(pct(latencies, 99)),
+      max: r1(latencies.at(-1) ?? 0),
+    },
   }
 }
 
@@ -107,7 +115,10 @@ export async function serverStats(sinceMs: number) {
     pending: number
     dead: number
     retried: number
-    endToEnd: Record<'all' | 'phone' | 'sms' | 'email' | 'ui', { count: number; p50: number; p95: number; p99: number; max: number }>
+    endToEnd: Record<
+      'all' | 'phone' | 'sms' | 'email' | 'ui',
+      { count: number; p50: number; p95: number; p99: number; max: number }
+    >
   }
 }
 
@@ -123,7 +134,11 @@ export async function waitForDrain(sinceMs: number, timeoutMs = 120_000) {
 }
 
 export async function putRule(rule: Record<string, unknown>) {
-  const res = await fetch(`${BASE}/api/rules`, { method: 'PUT', headers: ADMIN_HEADERS, body: JSON.stringify({ rule }) })
+  const res = await fetch(`${BASE}/api/rules`, {
+    method: 'PUT',
+    headers: ADMIN_HEADERS,
+    body: JSON.stringify({ rule }),
+  })
   if (!res.ok) throw new Error(`Cannot create rule ${rule.id}: ${await res.text()}`)
 }
 

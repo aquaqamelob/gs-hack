@@ -163,8 +163,8 @@ export default function RunbooksPage() {
           <Heading>Runbooks</Heading>
           <Text>
             Stored in Postgres (seeded from <code>config/runbooks/</code> on first boot); a save reaches every instance.
-            Every format becomes the same list of steps. Steps that need approval wait for a person (button, or SMS reply
-            “YES 123456”).
+            Every format becomes the same list of steps. Steps that need approval wait for a person (button, or SMS
+            reply “YES 123456”).
           </Text>
         </div>
         <Button color="dark/zinc" onClick={() => setAdding(!adding)}>

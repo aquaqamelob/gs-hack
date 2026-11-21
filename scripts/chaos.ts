@@ -31,8 +31,12 @@ async function gateway(up: boolean) {
     return
   }
   // Async spawn: a blocking call would stall the load generator for the seconds docker takes.
-  const p = Bun.spawn(['docker', 'compose', up ? 'start' : 'stop', 'mock-gateway'], { stdout: 'ignore', stderr: 'pipe' })
-  if ((await p.exited) !== 0) throw new Error(`docker compose ${up ? 'start' : 'stop'} failed: ${await new Response(p.stderr).text()}`)
+  const p = Bun.spawn(['docker', 'compose', up ? 'start' : 'stop', 'mock-gateway'], {
+    stdout: 'ignore',
+    stderr: 'pipe',
+  })
+  if ((await p.exited) !== 0)
+    throw new Error(`docker compose ${up ? 'start' : 'stop'} failed: ${await new Response(p.stderr).text()}`)
 }
 
 async function main() {
@@ -41,7 +45,12 @@ async function main() {
     id: RULE_ID,
     name: `Chaos test ${run} (temporary)`,
     team: 'team-settlements',
-    when: { all: [{ field: 'type', op: 'eq', value: 'CHAOS' }, { field: 'run', op: 'eq', value: run }] },
+    when: {
+      all: [
+        { field: 'type', op: 'eq', value: 'CHAOS' },
+        { field: 'run', op: 'eq', value: run },
+      ],
+    },
     notify: [{ to: 'team-settlements', channels: ['sms', 'ui'] }],
     present: { title: 'Chaos {{seq}}' },
     group_by: ['seq'],
@@ -54,14 +63,23 @@ async function main() {
     rate: RATE,
     durationSec: DURATION,
     source: 'chaos',
-    event: (seq) => ({ type: 'CHAOS', run, seq: `${run}-${seq}`, service: 'chaos', severity: 'ERROR', environment: 'perf' }),
+    event: (seq) => ({
+      type: 'CHAOS',
+      run,
+      seq: `${run}-${seq}`,
+      service: 'chaos',
+      severity: 'ERROR',
+      environment: 'perf',
+    }),
     onSecond: (t) => {
       if (t === DOWN_AT) faults.push(gateway(false).then(() => log('SMS gateway DOWN')))
       if (t === UP_AT) faults.push(gateway(true).then(() => log('SMS gateway UP')))
     },
   })
   await Promise.all(faults)
-  log(`load done: ${load.sent} events, ${load.httpErrors} HTTP errors, ${load.achievedRate} msg/s; waiting for the outbox to drain`)
+  log(
+    `load done: ${load.sent} events, ${load.httpErrors} HTTP errors, ${load.achievedRate} msg/s; waiting for the outbox to drain`
+  )
   const drained = await waitForDrain(since, 300_000)
 
   const sql = postgres(DATABASE_URL, { max: 2 })
@@ -76,7 +94,10 @@ async function main() {
   const sms = rows.filter((r) => r.channel === 'sms')
   const lookup: Record<string, { recorded: number; receipts: number }> = {}
   for (let i = 0; i < sms.length; i += 1000) {
-    const res = await fetch(`${GW}/lookup`, { method: 'POST', body: JSON.stringify({ keys: sms.slice(i, i + 1000).map((r) => r.key) }) })
+    const res = await fetch(`${GW}/lookup`, {
+      method: 'POST',
+      body: JSON.stringify({ keys: sms.slice(i, i + 1000).map((r) => r.key) }),
+    })
     Object.assign(lookup, await res.json())
   }
   const missingAtGateway = sms.filter((r) => r.status === 'sent' && !lookup[r.key]?.recorded)
@@ -95,7 +116,9 @@ async function main() {
     load,
     alerts,
     deliveries: rows.length,
-    byStatus: Object.fromEntries(['sent', 'pending', 'dead'].map((s) => [s, rows.filter((r) => r.status === s).length])),
+    byStatus: Object.fromEntries(
+      ['sent', 'pending', 'dead'].map((s) => [s, rows.filter((r) => r.status === s).length])
+    ),
     smsDeliveries: sms.length,
     smsRetried: sms.filter((r) => r.attempts > 1).length,
     retransmitsAbsorbedByIdempotencyKey: retransmits,

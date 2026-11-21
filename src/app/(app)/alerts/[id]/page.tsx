@@ -15,16 +15,21 @@ import { useCallback, useEffect, useState } from 'react'
 
 type Detail = Alert & { deliveries: Delivery[]; audit: AuditEntry[] }
 
-const STEP_BADGE: Record<AlertStep['status'], { color: 'zinc' | 'purple' | 'blue' | 'green' | 'red'; label: string }> = {
-  todo: { color: 'zinc', label: 'to do' },
-  awaiting_approval: { color: 'purple', label: 'waiting for approval' },
-  running: { color: 'blue', label: 'running' },
-  done: { color: 'green', label: 'done' },
-  failed: { color: 'red', label: 'failed' },
-  skipped: { color: 'zinc', label: 'skipped' },
-}
+const STEP_BADGE: Record<AlertStep['status'], { color: 'zinc' | 'purple' | 'blue' | 'green' | 'red'; label: string }> =
+  {
+    todo: { color: 'zinc', label: 'to do' },
+    awaiting_approval: { color: 'purple', label: 'waiting for approval' },
+    running: { color: 'blue', label: 'running' },
+    done: { color: 'green', label: 'done' },
+    failed: { color: 'red', label: 'failed' },
+    skipped: { color: 'zinc', label: 'skipped' },
+  }
 
-const DELIVERY_BADGE: Record<Delivery['status'], 'green' | 'amber' | 'red'> = { sent: 'green', pending: 'amber', dead: 'red' }
+const DELIVERY_BADGE: Record<Delivery['status'], 'green' | 'amber' | 'red'> = {
+  sent: 'green',
+  pending: 'amber',
+  dead: 'red',
+}
 
 const PLAIN_SEVERITY = {
   critical: 'Something important is broken right now and needs attention immediately.',
@@ -85,7 +90,11 @@ function StepCard({
             </span>
           )}
         </div>
-        {step.output && <p className="mt-2 rounded bg-zinc-50 px-2 py-1 font-mono text-xs break-all dark:bg-zinc-800/60">{step.output}</p>}
+        {step.output && (
+          <p className="mt-2 rounded bg-zinc-50 px-2 py-1 font-mono text-xs break-all dark:bg-zinc-800/60">
+            {step.output}
+          </p>
+        )}
         {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
       </div>
       {!disabled && (
@@ -95,8 +104,18 @@ function StepCard({
               Approve & run
             </Button>
           ) : !finished && step.action ? (
-            <Button color={step.approval === 'required' ? 'purple' : 'dark/zinc'} disabled={busy} onClick={() => act('run')}>
-              {busy ? 'Running…' : step.approval === 'required' ? 'Request approval' : step.status === 'failed' ? 'Retry' : 'Run'}
+            <Button
+              color={step.approval === 'required' ? 'purple' : 'dark/zinc'}
+              disabled={busy}
+              onClick={() => act('run')}
+            >
+              {busy
+                ? 'Running…'
+                : step.approval === 'required'
+                  ? 'Request approval'
+                  : step.status === 'failed'
+                    ? 'Retry'
+                    : 'Run'}
             </Button>
           ) : !finished ? (
             <Button outline disabled={busy} onClick={() => act(step.approval === 'required' ? 'run' : 'done')}>
@@ -164,7 +183,9 @@ export default function AlertPage({ params }: { params: { id: string } }) {
         <div className="flex flex-wrap items-center gap-2">
           <Badge color={SEVERITY_BADGE[alert.severity]}>{alert.severity}</Badge>
           {alert.count > 1 && <Badge color="zinc">happened {alert.count.toLocaleString()}×</Badge>}
-          <Badge color={alert.status === 'open' ? 'red' : alert.status === 'acked' ? 'blue' : 'green'}>{alert.status}</Badge>
+          <Badge color={alert.status === 'open' ? 'red' : alert.status === 'acked' ? 'blue' : 'green'}>
+            {alert.status}
+          </Badge>
           <span className="text-sm text-zinc-500">
             first {timeAgo(alert.firstSeen, now)} · last {timeAgo(alert.lastSeen, now)} · {alert.team}
           </span>
@@ -186,7 +207,10 @@ export default function AlertPage({ params }: { params: { id: string } }) {
           </p>
           {unassigned && (
             <p>
-              <Link href={`/schemas?fp=${alert.schemaFp}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
+              <Link
+                href={`/schemas?fp=${alert.schemaFp}`}
+                className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
                 Map this schema →
               </Link>{' '}
               <span className="text-sm text-zinc-500">then add a rule so the right team gets it next time.</span>
@@ -213,32 +237,43 @@ export default function AlertPage({ params }: { params: { id: string } }) {
             </Button>
           )}
           {!closed && (
-            <div className="flex w-full flex-wrap items-start gap-2">
-              <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Resolution note (optional)" className="max-w-sm" />
+            <div className="flex w-full max-w-lg flex-col gap-2">
+              <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Resolution note (optional)" />
               <Textarea
                 value={fixed}
                 onChange={(e) => setFixed(e.target.value)}
                 rows={2}
-                className="max-w-md"
-                placeholder={'What fixed it? One step per line (optional).\nSteps the runbook does not have yet are suggested for it.'}
+                placeholder={
+                  'What fixed it? One step per line (optional).\nSteps the runbook does not have yet are suggested for it.'
+                }
               />
-              <Button
-                color="green"
-                onClick={async () => {
-                  const lines = fixed.split('\n').filter((l) => l.trim())
-                  await op('resolve', { note: note || undefined, fixed: lines })
-                  setNote('')
-                  setFixed('')
-                  if (lines.length) setNotice('Thanks. New steps were suggested for the runbook; an admin reviews them on the Runbooks page.')
-                }}
-              >
-                Resolve
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  color="green"
+                  onClick={async () => {
+                    const lines = fixed.split('\n').filter((l) => l.trim())
+                    await op('resolve', { note: note || undefined, fixed: lines })
+                    setNote('')
+                    setFixed('')
+                    if (lines.length)
+                      setNotice(
+                        'Thanks. New steps were suggested for the runbook; an admin reviews them on the Runbooks page.'
+                      )
+                  }}
+                >
+                  Resolve
+                </Button>
+                <Button outline onClick={() => setProposing((x) => !x)}>
+                  Propose a fix
+                </Button>
+              </div>
             </div>
           )}
-          <Button outline onClick={() => setProposing((x) => !x)}>
-            Propose a fix
-          </Button>
+          {closed && (
+            <Button outline onClick={() => setProposing((x) => !x)}>
+              Propose a fix
+            </Button>
+          )}
           {closed && (
             <>
               <Text>
@@ -251,8 +286,8 @@ export default function AlertPage({ params }: { params: { id: string } }) {
             </>
           )}
           <span className="ml-auto text-xs text-zinc-500">
-            Reply code <code className="font-semibold">{alert.approvalCode}</code> (reply “ACK {alert.approvalCode}” or “YES{' '}
-            {alert.approvalCode}” from a phone or email this alert was sent to)
+            Reply code <code className="font-semibold">{alert.approvalCode}</code> (reply “ACK {alert.approvalCode}” or
+            “YES {alert.approvalCode}” from a phone or email this alert was sent to)
           </span>
         </div>
 
@@ -297,7 +332,9 @@ export default function AlertPage({ params }: { params: { id: string } }) {
         <details className="mt-6">
           <summary className="cursor-pointer text-sm text-zinc-500">Raw event and normalised fields</summary>
           <div className="mt-2 grid gap-3 lg:grid-cols-2">
-            <pre className="max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">{JSON.stringify(alert.raw, null, 2)}</pre>
+            <pre className="max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
+              {JSON.stringify(alert.raw, null, 2)}
+            </pre>
             <pre className="max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
               {JSON.stringify(alert.canonical, null, 2)}
             </pre>
@@ -324,7 +361,9 @@ export default function AlertPage({ params }: { params: { id: string } }) {
             )}
           </div>
           {alert.steps.length === 0 ? (
-            <Text className="mt-3">No runbook is attached to this rule yet. Add one on the Runbooks page and reference it from the rule.</Text>
+            <Text className="mt-3">
+              No runbook is attached to this rule yet. Add one on the Runbooks page and reference it from the rule.
+            </Text>
           ) : (
             <ol className="mt-4 space-y-3">
               {alert.steps.map((s, i) => (
@@ -353,8 +392,12 @@ export default function AlertPage({ params }: { params: { id: string } }) {
                   </TableCell>
                   <TableCell className="max-w-48 truncate">{d.address}</TableCell>
                   <TableCell>
-                    <Badge color={DELIVERY_BADGE[d.status]}>{d.status === 'pending' && d.attempts > 0 ? 'retrying' : d.status}</Badge>
-                    {d.lastError && d.status !== 'sent' && <span className="ml-2 text-xs text-red-600">{d.lastError}</span>}
+                    <Badge color={DELIVERY_BADGE[d.status]}>
+                      {d.status === 'pending' && d.attempts > 0 ? 'retrying' : d.status}
+                    </Badge>
+                    {d.lastError && d.status !== 'sent' && (
+                      <span className="ml-2 text-xs text-red-600">{d.lastError}</span>
+                    )}
                   </TableCell>
                   <TableCell>{d.attempts}</TableCell>
                   <TableCell>{d.sentAt ? `${d.sentAt - d.eventReceivedAt} ms` : '—'}</TableCell>
@@ -363,7 +406,9 @@ export default function AlertPage({ params }: { params: { id: string } }) {
               {alert.deliveries.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-zinc-500">
-                    {alert.nextNotifyAt ? `Grouping: first notification in ${Math.max(0, Math.round((alert.nextNotifyAt - now) / 1000))}s` : 'None yet'}
+                    {alert.nextNotifyAt
+                      ? `Grouping: first notification in ${Math.max(0, Math.round((alert.nextNotifyAt - now) / 1000))}s`
+                      : 'None yet'}
                   </TableCell>
                 </TableRow>
               )}

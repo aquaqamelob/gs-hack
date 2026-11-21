@@ -19,7 +19,14 @@ import { getPath, newId } from './util'
  * the normal config path. Learned steps are always plain text steps, never actions, so a resolution note can never
  * add a webhook call: turning a step into an action stays a human edit.
  */
-export const MANUAL_REASONS = ['too-noisy', 'wrong-team', 'wrong-severity', 'runbook-step-wrong', 'missing-step', 'other'] as const
+export const MANUAL_REASONS = [
+  'too-noisy',
+  'wrong-team',
+  'wrong-severity',
+  'runbook-step-wrong',
+  'missing-step',
+  'other',
+] as const
 export type Reason = (typeof MANUAL_REASONS)[number]
 
 export interface Proposal {
@@ -86,7 +93,8 @@ export function templatize(line: string, raw: unknown): string {
     if (!values.has(s)) values.set(s, f.path)
   }
   let out = line
-  for (const [value, path] of [...values].sort((a, b) => b[0].length - a[0].length)) out = out.split(value).join(`{{${path}}}`)
+  for (const [value, path] of [...values].sort((a, b) => b[0].length - a[0].length))
+    out = out.split(value).join(`{{${path}}}`)
   return out
 }
 
@@ -96,9 +104,15 @@ export async function learnFromResolution(alertId: string, lines: string[], acto
   if (!alert || alert.ruleId === '__unassigned') return []
   const rb = alert.runbook ? rt().runbooks.get(alert.runbook.id) : undefined
   // Known steps: the runbook's templates, and the alert's own steps as rendered (what the person saw and may copy).
-  const existing = new Set([...(rb?.steps ?? []).map((s) => normStep(s.text)), ...alert.steps.map((s) => normStep(s.text))])
+  const existing = new Set([
+    ...(rb?.steps ?? []).map((s) => normStep(s.text)),
+    ...alert.steps.map((s) => normStep(s.text)),
+  ])
   const out: Proposal[] = []
-  for (const line of lines.map((l) => l.trim().replace(/^(\d+[.)]|[-*•])\s+/, '')).filter(Boolean).slice(0, 10)) {
+  for (const line of lines
+    .map((l) => l.trim().replace(/^(\d+[.)]|[-*•])\s+/, ''))
+    .filter(Boolean)
+    .slice(0, 10)) {
     const text = templatize(line.slice(0, 300), alert.raw)
     const fp = normStep(text)
     if (!fp || existing.has(fp) || existing.has(normStep(line))) continue
@@ -117,7 +131,12 @@ export async function learnFromResolution(alertId: string, lines: string[], acto
     out.push(fromRow(row))
   }
   if (out.length) {
-    await audit(actor, 'proposal.learned', alert.id, out.map((p) => `${p.target}: ${p.text} (seen ${p.seen}×)`).join(' | '))
+    await audit(
+      actor,
+      'proposal.learned',
+      alert.id,
+      out.map((p) => `${p.target}: ${p.text} (seen ${p.seen}×)`).join(' | ')
+    )
     await publish({ type: 'proposal' })
   }
   return out
@@ -135,7 +154,10 @@ export async function proposeFix(alert: Alert, reason: Reason, text: string, act
 }
 
 /** The runbook text with one more step, in the runbook's own format (free text becomes a Markdown list). */
-export function withStep(rb: Pick<Runbook, 'format' | 'content' | 'title'>, text: string): { format: Runbook['format']; content: string } {
+export function withStep(
+  rb: Pick<Runbook, 'format' | 'content' | 'title'>,
+  text: string
+): { format: Runbook['format']; content: string } {
   if (rb.format === 'yaml') {
     const doc = YAML.parseDocument(rb.content)
     if (!doc.has('steps')) doc.set('steps', doc.createNode([]))
@@ -149,7 +171,10 @@ export function withStep(rb: Pick<Runbook, 'format' | 'content' | 'title'>, text
     const marker = last ? (n ? `${Number(n) + 1}.` : (last.trim()[0] ?? '-')) : `${items.length + 1}.`
     return { format: 'markdown', content: `${rb.content.replace(/\s*$/, '')}\n${marker} ${text}\n` }
   }
-  return { format: 'markdown', content: `# ${rb.title}\n\n1. ${rb.content.trim().replace(/\s*\n\s*/g, ' ')}\n2. ${text}\n` }
+  return {
+    format: 'markdown',
+    content: `# ${rb.title}\n\n1. ${rb.content.trim().replace(/\s*\n\s*/g, ' ')}\n2. ${text}\n`,
+  }
 }
 
 async function decide(id: number, status: 'accepted' | 'dismissed', actor: string) {
@@ -178,7 +203,11 @@ export async function acceptProposal(id: number, actor: string) {
       if (!rule) throw new ConfigError(`Rule ${p.patch.rule} no longer exists`, 409)
       const rbId = slug(rule.id)
       await saveRunbook(rbId, 'markdown', `# ${rule.name}\n\n1. ${p.patch.text}\n`, actor)
-      await updateRules((rules) => ({ rules: rules.map((r) => (r.id === rule.id ? { ...r, runbook: rbId } : r)) }), undefined, actor)
+      await updateRules(
+        (rules) => ({ rules: rules.map((r) => (r.id === rule.id ? { ...r, runbook: rbId } : r)) }),
+        undefined,
+        actor
+      )
       applied = `new runbook ${rbId} attached to rule ${rule.id}`
     }
   }

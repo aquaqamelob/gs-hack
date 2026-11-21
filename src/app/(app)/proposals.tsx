@@ -62,10 +62,15 @@ export function ProposalList({
         {mine.some((p) => p.kind === 'learned') ? 'Suggested from resolved incidents' : 'Proposed fixes'}
       </div>
       {mine.map((p) => (
-        <div key={p.id} className="flex flex-wrap items-start justify-between gap-2 border-t border-sky-500/20 pt-2 first:border-0 first:pt-0">
+        <div
+          key={p.id}
+          className="flex flex-wrap items-start justify-between gap-2 border-t border-sky-500/20 pt-2 first:border-0 first:pt-0"
+        >
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge color={p.kind === 'learned' ? 'sky' : 'amber'}>{p.kind === 'learned' ? 'learned' : REASON_LABEL[p.reason] ?? p.reason}</Badge>
+              <Badge color={p.kind === 'learned' ? 'sky' : 'amber'}>
+                {p.kind === 'learned' ? 'learned' : (REASON_LABEL[p.reason] ?? p.reason)}
+              </Badge>
               {p.kind === 'learned' && (
                 <span className="font-mono text-green-700 dark:text-green-400">
                   + {p.patch?.runbook ? 'step' : 'new runbook with step'}: {p.text}

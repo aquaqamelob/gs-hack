@@ -1,5 +1,5 @@
-import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
 import { ackAlert, addNote, alertDetail, reopenAlert, resolveAlert } from '@/lib/engine/alerts'
+import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
 import { learnFromResolution } from '@/lib/engine/proposals'
 import { rt } from '@/lib/engine/runtime'
 
@@ -25,7 +25,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         break
       case 'resolve': {
         // "What fixed it?": one step per line. Steps the runbook does not have yet become proposals for it.
-        const fixed = (Array.isArray(body.fixed) ? body.fixed : String(body.fixed ?? '').split('\n')).map(String).filter((l) => l.trim())
+        const fixed = (Array.isArray(body.fixed) ? body.fixed : String(body.fixed ?? '').split('\n'))
+          .map(String)
+          .filter((l) => l.trim())
         const note = body.note?.trim() || (fixed.length ? `Fixed by: ${fixed.join('; ')}` : undefined)
         await resolveAlert(params.id, actor, note?.slice(0, 500))
         if (fixed.length) await learnFromResolution(params.id, fixed, actor)

@@ -412,8 +412,8 @@ export function RuleEditor({
           <section>
             <div className="text-sm font-semibold">1. Which events?</div>
             <Text>
-              Use canonical fields (severity, service, environment, title, error.code, entity_id…), custom fields
-              added under Sources &amp; schemas, <code>source</code>, or any raw path from the event.
+              Use canonical fields (severity, service, environment, title, error.code, entity_id…), custom fields added
+              under Sources &amp; schemas, <code>source</code>, or any raw path from the event.
             </Text>
             <div className="mt-3">
               <ConditionEditor when={rule.when} fields={meta.fields} onChange={(when) => patch({ when })} />
@@ -599,7 +599,13 @@ function span(ms: number) {
 /** "This rule would send: Anna 4× SMS (1 outside working hours), …" from a replay of recent events. */
 function NoiseBudget({ budget }: { budget: Budget }) {
   if (!budget.events) return null
-  const loud = budget.lines.filter((l) => l.channel !== 'ui')
+  // One entry per person or team: "Anna Kowalska: 4× SMS (1 outside working hours), 2× email".
+  const loud = [
+    ...budget.lines
+      .filter((l) => l.channel !== 'ui')
+      .reduce((m, l) => m.set(l.recipient, [...(m.get(l.recipient) ?? []), l]), new Map<string, Budget['lines']>())
+      .values(),
+  ]
   const window = budget.from !== null && budget.to !== null ? span(budget.to - budget.from) : ''
   return (
     <div className="mt-6 rounded-lg border border-amber-500/30 bg-amber-50 p-4 text-sm dark:bg-amber-500/10">
@@ -607,13 +613,21 @@ function NoiseBudget({ budget }: { budget: Budget }) {
       {loud.length ? (
         <>
           This rule would send{' '}
-          {loud.map((l, i) => (
-            <span key={`${l.recipient}:${l.channel}`}>
-              {i > 0 && (i === loud.length - 1 ? ' and ' : ', ')}
-              <strong>
-                {l.name} {l.count}× {CHANNEL_WORD[l.channel] ?? l.channel}
-              </strong>
-              {l.outsideHours > 0 && <span className="text-red-600"> ({l.outsideHours} outside working hours)</span>}
+          {loud.map((group, i) => (
+            <span key={group[0].recipient}>
+              {i > 0 && (i === loud.length - 1 ? ' and ' : '; ')}
+              <strong>{group[0].name}</strong>:{' '}
+              {group.map((l, j) => (
+                <span key={l.channel}>
+                  {j > 0 && ', '}
+                  <strong>
+                    {l.count}× {CHANNEL_WORD[l.channel] ?? l.channel}
+                  </strong>
+                  {l.outsideHours > 0 && (
+                    <span className="text-red-600"> ({l.outsideHours} outside working hours)</span>
+                  )}
+                </span>
+              ))}
             </span>
           ))}
           .
