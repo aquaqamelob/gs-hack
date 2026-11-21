@@ -7,7 +7,7 @@ import { count, rt } from './runtime'
 import { asJson, normalize } from './schema'
 import { observeSchema } from './schemas'
 import type { Alert, AlertStep, Canonical, EventView, Json, Rule, Runbook, SchemaRecord, Severity } from './types'
-import { newId, render, renderDeep, shortHash } from './util'
+import { newApprovalCode, newId, render, renderDeep, shortHash } from './util'
 
 const SEVERITY_COLOR: Record<Severity, string> = { critical: 'red', error: 'orange', warning: 'amber', info: 'sky' }
 
@@ -203,7 +203,7 @@ export function draftAlert(rule: Rule, ev: Prepared, n: number): Alert {
     schemaName: ev.schemaName,
     raw: ev.raw,
     canonical: ev.canonical,
-    approvalCode: String(Math.floor(1000 + Math.random() * 9000)),
+    approvalCode: newApprovalCode(),
     approvalExpiresAt: now + 60 * 60 * 1000,
   }
 }
@@ -217,7 +217,7 @@ async function upsert(tx: Tx, op: GroupOp): Promise<string> {
   const lastRaw = op.last.raw
   const lastCanonical = op.last.canonical
 
-  const attempt = () => tx`
+  const insert = (q: Tx) => q`
     insert into alerts (id, dedup_key, rule_id, rule_name, team, severity, title, body, color, fields, steps, runbook, count,
       notified_count, notify_seq, group_interval_s, next_notify_at, last_notified_at, first_received_at, source, schema_fp, schema_name,
       raw, canonical, approval_code, approval_expires_at)
@@ -237,6 +237,18 @@ async function upsert(tx: Tx, op: GroupOp): Promise<string> {
         else alerts.next_notify_at end
     where alerts.last_seen > now() - make_interval(secs => ${windowSec})
     returning id, (xmax = 0) as inserted`
+
+  // A reply-code clash aborts the statement, so each attempt runs in a savepoint and retries with a fresh code.
+  const attempt = async () => {
+    for (let i = 0; ; i++) {
+      try {
+        return await tx.savepoint((sp) => insert(sp))
+      } catch (e) {
+        if (i >= 4 || (e as { constraint_name?: string }).constraint_name !== 'alerts_code_open') throw e
+        a.approvalCode = newApprovalCode()
+      }
+    }
+  }
 
   let [row] = await attempt()
   if (!row) {

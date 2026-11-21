@@ -34,6 +34,10 @@ services:
   # SMS / phone gateway mock and the target of runbook webhooks.
   mock-gateway:
     build: ./mock-gateway
+    environment:
+      # Inbound replies go to CTRL through the load balancer, signed like a provider webhook.
+      CTRL_REPLY_URL: http://lb/api/reply
+      REPLY_HMAC: dev-reply-hmac
     networks:
       default:
         aliases: [counterparty-service, workflow-api, escalation-api]
@@ -59,6 +63,9 @@ services:
       ACTION_ALLOWED_HOSTS: counterparty-service,workflow-api,escalation-api
       INGEST_TOKEN_PARTNER: dev-partner-token
       INGEST_HMAC_PAYMENTS: dev-payments-hmac
+      # SMS/email reply webhook (/api/reply): HMAC from the gateway, bearer for scripts.
+      INGEST_HMAC_REPLY: dev-reply-hmac
+      INGEST_TOKEN_REPLY: dev-reply-token
 
   lb:
     image: nginx:1.27-alpine

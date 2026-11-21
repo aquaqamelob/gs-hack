@@ -93,3 +93,18 @@ export async function runScenario(scenario: Scenario, count = 1) {
     }
   }
 }
+
+/**
+ * Console reply simulator: hands the reply to the mock SMS gateway, which signs it and calls /api/reply like a provider.
+ * CTRL itself never signs replies, so this goes through the same sender check and attempt limit as a real one.
+ */
+export async function simulateReply(from: string, text: string) {
+  const res = await fetch(`${(process.env.SMS_GATEWAY_URL ?? 'http://localhost:4010').replace(/\/$/, '')}/inbound`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from: from.slice(0, 120), text: text.slice(0, 200) }),
+    signal: AbortSignal.timeout(5000),
+  })
+  const body = (await res.json().catch(() => ({ message: `gateway HTTP ${res.status}` }))) as { message?: string; error?: string }
+  return { status: res.status, body: { ...body, message: body.message ?? body.error ?? `HTTP ${res.status}` } }
+}

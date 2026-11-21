@@ -1,8 +1,13 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomInt } from 'node:crypto'
 import type { Json } from './types'
 
 export function newId(prefix: string) {
   return `${prefix}_${randomBytes(5).toString('hex')}`
+}
+
+/** 6-digit reply code from the CSPRNG. Uniqueness among open alerts is enforced by a partial unique index. */
+export function newApprovalCode() {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0')
 }
 
 export function shortHash(input: string) {

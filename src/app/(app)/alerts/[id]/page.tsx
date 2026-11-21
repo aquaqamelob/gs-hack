@@ -232,8 +232,8 @@ export default function AlertPage({ params }: { params: { id: string } }) {
             </>
           )}
           <span className="ml-auto text-xs text-zinc-500">
-            Reply code <code className="font-semibold">{alert.approvalCode}</code> (SMS / email: “ACK {alert.approvalCode}”, “YES{' '}
-            {alert.approvalCode}”)
+            Reply code <code className="font-semibold">{alert.approvalCode}</code> (reply “ACK {alert.approvalCode}” or “YES{' '}
+            {alert.approvalCode}” from a phone or email this alert was sent to)
           </span>
         </div>
 

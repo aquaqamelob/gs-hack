@@ -160,7 +160,7 @@ export default function RunbooksPage() {
           <Heading>Runbooks</Heading>
           <Text>
             Files in <code>config/runbooks/</code>, reloaded live. Every format becomes the same list of steps. Steps that need
-            approval wait for a person (button, or SMS reply “YES 1234”).
+            approval wait for a person (button, or SMS reply “YES 123456”).
           </Text>
         </div>
         <Button color="dark/zinc" onClick={() => setAdding(!adding)}>
