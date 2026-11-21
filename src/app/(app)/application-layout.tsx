@@ -14,7 +14,7 @@ import {
   SidebarSpacer,
 } from '@/components/sidebar'
 import { SidebarLayout } from '@/components/sidebar-layout'
-import { LEVELS, useActor, useConnected, useLevel, useMe, useMetrics } from '@/lib/client'
+import { useActor, useConnected, useMe, useMetrics } from '@/lib/client'
 import {
   AdjustmentsHorizontalIcon,
   BellAlertIcon,
@@ -65,27 +65,6 @@ function ActorPicker() {
         </select>
       </span>
     </label>
-  )
-}
-
-function LevelPicker() {
-  const [level, setLevel] = useLevel()
-  const current = LEVELS.find((l) => l.id === level)!
-  return (
-    <div className="px-2">
-      <div className="grid grid-cols-3 rounded-lg bg-zinc-100 p-0.5 text-xs font-medium dark:bg-zinc-800">
-        {LEVELS.map((l) => (
-          <button
-            key={l.id}
-            onClick={() => setLevel(l.id)}
-            className={`rounded-md px-2 py-1.5 ${l.id === level ? 'bg-white shadow-sm dark:bg-zinc-700' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
-          >
-            {l.label}
-          </button>
-        ))}
-      </div>
-      <p className="mt-1.5 text-xs/5 text-zinc-500 dark:text-zinc-400">{current.hint}</p>
-    </div>
   )
 }
 
@@ -154,10 +133,6 @@ export function ApplicationLayout({ children }: { children: React.ReactNode }) {
                   <SidebarLabel>{label}</SidebarLabel>
                 </SidebarItem>
               ))}
-            </SidebarSection>
-            <SidebarSection>
-              <SidebarHeading>View</SidebarHeading>
-              <LevelPicker />
             </SidebarSection>
             <SidebarSpacer />
             <SidebarSection>

@@ -44,30 +44,6 @@ export function useMe() {
   return { me: data?.me ?? null, people: data?.people ?? [], isAdmin: data?.me.role === 'admin', reload: load }
 }
 
-export type Level = 'simple' | 'standard' | 'expert'
-export const LEVELS: { id: Level; label: string; hint: string }[] = [
-  { id: 'simple', label: 'Simple', hint: 'Plain language, only what you need to act' },
-  { id: 'standard', label: 'Standard', hint: 'Field names, rules and details' },
-  { id: 'expert', label: 'Expert', hint: 'Raw paths, formats, confidence, JSON' },
-]
-const LEVEL_KEY = 'ctrl.level'
-
-/** Readability level for the whole console, remembered per browser. */
-export function useLevel() {
-  const [level, setLevelState] = useState<Level>('standard')
-  useEffect(() => {
-    const read = () => setLevelState((localStorage.getItem(LEVEL_KEY) as Level) || 'standard')
-    read()
-    window.addEventListener('level-changed', read)
-    return () => window.removeEventListener('level-changed', read)
-  }, [])
-  const setLevel = useCallback((l: Level) => {
-    localStorage.setItem(LEVEL_KEY, l)
-    window.dispatchEvent(new Event('level-changed'))
-  }, [])
-  return [level, setLevel] as const
-}
-
 function currentActor() {
   return (typeof window !== 'undefined' && localStorage.getItem(ACTOR_KEY)) || DEFAULT_ACTOR
 }

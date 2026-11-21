@@ -34,8 +34,6 @@ export const CUSTOM_FIELD_TYPES: CustomFieldType[] = ['text', 'number', 'id']
 export interface CustomField {
   key: string
   description: string
-  /** Plain-language question shown at the "simple" readability level. */
-  question?: string
   /** Field names that usually hold this value, e.g. amount, notional, value. */
   synonyms: string[]
   type: CustomFieldType
