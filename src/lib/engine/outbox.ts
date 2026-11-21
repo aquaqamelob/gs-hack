@@ -46,7 +46,7 @@ export interface PlannedDelivery {
 }
 
 /** Who gets what, on which channel. Idempotency key = alert + notification sequence + channel + recipient. */
-export function planDeliveries(alert: Alert, rule: Rule | undefined, reason: Delivery['reason'], eventReceivedAt: number): PlannedDelivery[] {
+export function planDeliveries(alert: Alert, rule: Rule | undefined, reason: Delivery['reason'], eventReceivedAt: number, at = Date.now()): PlannedDelivery[] {
   const out: PlannedDelivery[] = []
   const routes = rule?.notify?.length ? rule.notify : [{ to: alert.team }]
   let ui = false
@@ -66,7 +66,7 @@ export function planDeliveries(alert: Alert, rule: Rule | undefined, reason: Del
   }
   for (const route of routes) {
     const recipient = findRecipient(route.to)
-    for (const channel of channelsFor(route, recipient, alert.severity)) {
+    for (const channel of channelsFor(route, recipient, alert.severity, at)) {
       if (channel === 'ui') ui = true
       add(recipient?.id ?? route.to, addressFor(recipient, channel, route.to), channel)
     }

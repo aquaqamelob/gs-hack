@@ -11,7 +11,7 @@ import { newApprovalCode, newId, render, renderDeep, shortHash } from './util'
 
 const SEVERITY_COLOR: Record<Severity, string> = { critical: 'red', error: 'orange', warning: 'amber', info: 'sky' }
 
-interface Prepared extends EventView {
+export interface Prepared extends EventView {
   receivedAt: number
   schema: SchemaRecord
   rules: Rule[]

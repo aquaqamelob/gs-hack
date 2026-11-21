@@ -9,6 +9,7 @@ const messages: Message[] = []
 const seen = new Map<string, number>()
 let seq = 0
 let down = false
+let duplicatesRejected = 0
 
 function record(m: Omit<Message, 'id' | 'at'>) {
   const msg = { ...m, id: ++seq, at: Date.now() }
@@ -39,7 +40,7 @@ Bun.serve({
     if (path === '/stats') {
       const by: Record<string, number> = {}
       for (const m of messages) by[m.channel] = (by[m.channel] ?? 0) + 1
-      return json({ total: messages.length, uniqueKeys: seen.size, byChannel: by, down })
+      return json({ total: messages.length, uniqueKeys: seen.size, duplicatesRejected, byChannel: by, down })
     }
     if (path === '/chaos' && req.method === 'POST') {
       down = Boolean(((await req.json().catch(() => ({}))) as { down?: boolean }).down)
@@ -68,7 +69,10 @@ Bun.serve({
     if ((path === '/sms' || path === '/phone') && req.method === 'POST') {
       const body = (await req.json().catch(() => ({}))) as { to?: string; text?: string; key?: string }
       const key = req.headers.get('idempotency-key') ?? body.key ?? ''
-      if (key && seen.has(key)) return json({ id: seen.get(key), duplicate: true })
+      if (key && seen.has(key)) {
+        duplicatesRejected++
+        return json({ id: seen.get(key), duplicate: true })
+      }
       const msg = record({ channel: path.slice(1), to: String(body.to ?? ''), text: String(body.text ?? ''), key })
       if (key) seen.set(key, msg.id)
       return json({ id: msg.id, duplicate: false })

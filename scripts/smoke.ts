@@ -244,5 +244,33 @@ const exported = await (await fetch(`${B}/api/rules/export`)).text()
 check('GET /api/rules/export returns the rules as YAML', exported.startsWith('rules:') && exported.includes(`id: ${r1}`))
 for (const rid of [r1, r2, r3]) await send('DELETE', `/api/rules?id=${rid}`)
 
+// 11. Noise budget: the forecast must equal what the real grouping and outbox then send.
+const noiseType = `NOISE_${run}`
+const noiseRule = {
+  id: `smoke-noise-${run}`,
+  name: 'Smoke noise budget',
+  team: 'team-platform',
+  when: { field: 'type', op: 'eq', value: noiseType },
+  notify: [{ to: 'piotr', channels: ['sms'] }],
+  group_by: ['type'],
+  group_wait: '1s',
+  group_interval: '2s',
+}
+const asAdmin = { 'content-type': 'application/json', 'x-actor': 'admin' }
+await fetch(`${B}/api/rules`, { method: 'PUT', headers: asAdmin, body: JSON.stringify({ rule: noiseRule }) })
+await sleep(500)
+let noiseAlert = ''
+for (const wait of [0, 100, 3900, 4000]) {
+  await sleep(wait)
+  const r = await call('/ingest/webhook', { type: noiseType, service: 'noise', severity: 'ERROR' })
+  noiseAlert = r.alertIds[0]
+}
+await sleep(3500)
+const realSms = (await alertOf(noiseAlert)).deliveries.filter((d: any) => d.channel === 'sms').length
+const forecast = (await call('/api/rules/test', { rule: noiseRule })).noise
+const forecastSms = forecast.lines.find((l: any) => l.recipient === 'piotr' && l.channel === 'sms')?.count
+check('noise budget forecast equals real SMS sent', realSms === 3 && forecastSms === realSms, `forecast ${forecastSms}, real ${realSms}, from 4 events`)
+await fetch(`${B}/api/rules?id=${noiseRule.id}`, { method: 'DELETE', headers: asAdmin })
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
 process.exit(failures ? 1 : 0)

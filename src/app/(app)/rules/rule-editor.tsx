@@ -20,6 +20,41 @@ import {
 import { useState } from 'react'
 import YAML from 'yaml'
 
+type NoiseBudget = {
+  fromMs: number | null
+  toMs: number | null
+  notifications: number
+  lines: { recipient: string; name: string; channel: string; count: number; outsideHours: number }[]
+}
+
+const CHANNEL_NAMES: Record<string, string> = { sms: 'SMS', phone: 'phone call', email: 'email', ui: 'console' }
+
+function timeSpan(fromMs: number | null, toMs: number | null) {
+  if (fromMs === null || toMs === null) return ''
+  const min = (toMs - fromMs) / 60_000
+  if (min < 1) return 'in under a minute of traffic'
+  return min < 90 ? `over ${Math.round(min)} min of traffic` : `over ${Math.round(min / 60)} h of traffic`
+}
+
+function NoiseSummary({ noise }: { noise: NoiseBudget }) {
+  return (
+    <div className="mt-3 border-t border-zinc-950/10 pt-3 dark:border-white/10">
+      <strong>Noise budget:</strong> {noise.notifications} notification round{noise.notifications === 1 ? '' : 's'}{' '}
+      {timeSpan(noise.fromMs, noise.toMs)}, after grouping. Nothing is sent by this preview.
+      {noise.lines.length > 0 && (
+        <ul className="mt-1 list-disc pl-5">
+          {noise.lines.map((l) => (
+            <li key={`${l.recipient}:${l.channel}`}>
+              {l.name}: {l.count}× {CHANNEL_NAMES[l.channel] ?? l.channel}
+              {l.outsideHours > 0 && <span className="text-amber-700 dark:text-amber-400"> ({l.outsideHours} outside working hours)</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export type RuleRow = Rule & { summary: string; evalError?: { count: number; message: string; at: number } }
 export type Meta = {
   version: string
@@ -289,6 +324,7 @@ export function RuleEditor({
     matched: number
     alerts: number
     samples: { title: string; schema: string }[]
+    noise: NoiseBudget
   } | null>(null)
   const previousId = initial?.id
 
@@ -559,6 +595,7 @@ export function RuleEditor({
               </li>
             ))}
           </ul>
+          <NoiseSummary noise={test.noise} />
         </div>
       )}
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
