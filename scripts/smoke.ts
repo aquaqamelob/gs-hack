@@ -6,6 +6,7 @@ const B = process.env.BASE_URL ?? 'http://localhost:3000'
 const GW = process.env.GATEWAY_URL ?? 'http://localhost:4010'
 const PARTNER_TOKEN = process.env.INGEST_TOKEN_PARTNER ?? 'dev-partner-token'
 const PAYMENTS_HMAC = process.env.INGEST_HMAC_PAYMENTS ?? 'dev-payments-hmac'
+const REPLY_TOKEN = process.env.INGEST_TOKEN_REPLY ?? 'dev-reply-token'
 
 async function call<T = any>(path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
   const res = await fetch(B + path, {
@@ -16,6 +17,12 @@ async function call<T = any>(path: string, body?: unknown, headers: Record<strin
   const data = await res.json()
   if (!res.ok) throw new Error(`${path}: ${res.status} ${JSON.stringify(data)}`)
   return data
+}
+
+/** Reply webhook as a script would call it (bearer). */
+async function replyAs(from: string, text: string, headers: Record<string, string> = { authorization: `Bearer ${REPLY_TOKEN}` }) {
+  const res = await fetch(B + '/api/reply', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ from, text }) })
+  return { status: res.status, body: (await res.json().catch(() => ({}))) as any }
 }
 
 async function status(path: string, body: string, headers: Record<string, string> = {}) {
@@ -42,6 +49,7 @@ async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, timeoutMs =
 const alertOf = async (id: string) => (await call(`/api/alerts/${id}`)).alert
 const chaos = (down: boolean) => fetch(`${GW}/chaos`, { method: 'POST', body: JSON.stringify({ down }) })
 const run = Date.now().toString(36)
+const tail = String(Date.now()).slice(-6) // digits for per-run sender numbers, so reruns never share a lockout
 
 // 1. Ingest contract: 202 for anything parseable, 400 malformed, 401 bad credentials.
 check('unknown schema accepted with 202', (await status('/ingest/webhook', JSON.stringify({ [`x_${run}`]: 1 }))) === 202)
@@ -100,12 +108,27 @@ check('500 identical events fold into one alert', burstAlert.count >= 500 && bur
 // 4. Runbook steps as buttons, and approval by SMS reply.
 const s2 = (await call(`/api/alerts/${id}/steps/s2`, { op: 'run' })).alert.steps[1]
 check('retry_workflow webhook runs', s2.status === 'done', s2.output)
-const reply = await call('/api/reply', { from: '+48 600 333 444', text: `YES ${a.approvalCode}` })
-check('escalation approved by "YES <code>" reply', reply.ok, reply.message)
+// Reply webhook hardening: auth, 6-digit code, sender must be a recipient, attempt limit.
+const PIOTR = '+48 600 333 444' // on call for team-settlements: the SMS for this alert went to this number
+check('reply code is 6 digits', /^\d{6}$/.test(a.approvalCode), a.approvalCode)
+check('unauthenticated reply rejected with 401', (await replyAs(PIOTR, `YES ${a.approvalCode}`, {})).status === 401)
+const stranger = await replyAs(`+48 500 ${tail}`, `YES ${a.approvalCode}`)
+check('correct code from a non-recipient rejected with 403', stranger.status === 403, `${stranger.status} ${stranger.body.message}`)
+a = await alertOf(id)
+check('non-recipient reply audited as reply.rejected', a.audit.some((e: any) => e.action === 'reply.rejected'))
+check('non-recipient reply did not run the step', a.steps[2]?.status !== 'done', a.steps[2]?.status)
+const guesser = `+48 501 ${tail}`
+const guesses: number[] = []
+for (let i = 0; i < 6; i++) guesses.push((await replyAs(guesser, `YES ${String(100000 + i)}`)).status)
+check('6 wrong codes from one sender: 5× 400 then 429', guesses.slice(0, 5).every((x) => x === 400) && guesses[5] === 429, guesses.join(','))
+// The correct code goes through the mock gateway, which signs the webhook with HMAC like a provider.
+const viaGateway = await fetch(`${GW}/inbound`, { method: 'POST', body: JSON.stringify({ from: PIOTR, text: `YES ${a.approvalCode}` }) })
+const reply = (await viaGateway.json()) as any
+check('escalation approved by "YES <code>" from a recipient (signed via gateway)', viaGateway.status === 200 && reply.ok, `${viaGateway.status} ${reply.message}`)
 a = await alertOf(id)
 check('escalate webhook ran after approval', a.steps[2]?.status === 'done', a.steps[2]?.output)
 check('approval recorded in the audit log', a.audit.some((e: any) => e.action === 'step.approved' && e.actor.startsWith('reply:')))
-check('unknown approval code refused', (await status('/api/reply', JSON.stringify({ from: '+48 600 333 444', text: 'YES 0000' }))) === 400)
+check('unknown approval code refused', (await replyAs(`+48 502 ${tail}`, 'YES 000000')).status === 400)
 
 // 5. Alertmanager firing → resolved closes the alert; Anna's working hours pick the channel.
 const m = await call('/api/demo', { scenario: 'metric' })
