@@ -5,7 +5,7 @@ import { Button } from '@/components/button'
 import { Heading, Subheading } from '@/components/heading'
 import { Select } from '@/components/select'
 import { Text } from '@/components/text'
-import { COLOR_BAR, SEVERITY_BADGE, api, timeAgo, useLive, useNow, type AlertSummary } from '@/lib/client'
+import { COLOR_BAR, SEVERITY_BADGE, api, isConflict, timeAgo, useLive, useNow, type AlertSummary } from '@/lib/client'
 import type { Rule } from '@/lib/engine/types'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -125,13 +125,15 @@ function MyAlerts({ teams, names }: { teams: Set<string>; names: Map<string, str
 export default function MyViewPage() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [recipients, setRecipients] = useState<Row[]>([])
+  const [recipientsVersion, setRecipientsVersion] = useState('')
   const [editing, setEditing] = useState<Rule | 'new' | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
-    const [m, r] = await Promise.all([api<Meta>('/api/rules'), api<{ recipients: Row[] }>('/api/recipients')])
+    const [m, r] = await Promise.all([api<Meta>('/api/rules'), api<{ recipients: Row[]; version: string }>('/api/recipients')])
     setMeta(m)
     setRecipients(r.recipients)
+    setRecipientsVersion(r.version)
   }, [])
   useEffect(() => {
     void load()
@@ -176,16 +178,17 @@ export default function MyViewPage() {
       await load()
     } catch (e) {
       setError((e as Error).message)
+      if (isConflict(e)) void load()
     }
   }
   const toggle = (r: RuleRow) =>
     run(() => {
       const { summary: _s, ...clean } = r
-      return api('/api/rules', { method: 'PUT', body: { rule: { ...clean, enabled: r.enabled === false } } })
+      return api('/api/rules', { method: 'PUT', body: { rule: { ...clean, enabled: r.enabled === false }, version: meta.version } })
     })
   const remove = (r: RuleRow) =>
     confirm(`Delete your filter “${r.name}”?`) &&
-    run(() => api(`/api/rules?id=${encodeURIComponent(r.id)}`, { method: 'DELETE' }))
+    run(() => api(`/api/rules?id=${encodeURIComponent(r.id)}&version=${meta.version}`, { method: 'DELETE' }))
 
   return (
     <>
@@ -229,6 +232,7 @@ export default function MyViewPage() {
                 key={editing === 'new' ? 'new' : editing.id}
                 initial={editing === 'new' ? null : editing}
                 meta={meta}
+                reload={() => void load()}
                 personal={{ id: me.id, name: me.name }}
                 onClose={(saved) => {
                   setEditing(null)
@@ -295,7 +299,7 @@ export default function MyViewPage() {
           <Text>Used by every rule that notifies you without naming channels.</Text>
           {self && (
             <div className="mt-4">
-              <RecipientCard r={self} all={recipients} onSaved={load} editable isAdmin={me.role === 'admin'} />
+              <RecipientCard r={self} all={recipients} version={recipientsVersion} onSaved={load} editable isAdmin={me.role === 'admin'} />
             </div>
           )}
         </section>

@@ -7,7 +7,7 @@ import { Input } from '@/components/input'
 import { Select } from '@/components/select'
 import { Text } from '@/components/text'
 import { Textarea } from '@/components/textarea'
-import { api } from '@/lib/client'
+import { api, isConflict } from '@/lib/client'
 import {
   CHANNELS,
   type Condition,
@@ -22,6 +22,7 @@ import YAML from 'yaml'
 
 export type RuleRow = Rule & { summary: string }
 export type Meta = {
+  version: string
   rules: RuleRow[]
   fields: string[]
   recipients: { id: string; name: string; kind: string }[]
@@ -267,12 +268,15 @@ export function RuleEditor({
   meta,
   onClose,
   personal,
+  reload,
 }: {
   initial: Rule | null
   meta: Meta
   onClose: (saved: boolean) => void
   /** Set when a person edits their own filter: owner and recipient are locked to them. */
   personal?: { id: string; name: string }
+  /** Reloads meta; called after a 409 so the next save carries the new version. */
+  reload?: () => void
 }) {
   const [rule, setRule] = useState<Rule>(
     initial ? structuredClone(initial) : personal ? personalBlank(personal.id) : blank()
@@ -333,10 +337,12 @@ export function RuleEditor({
           .slice(0, 50)
         r.id = personal && base ? `${personal.id}-${base}`.slice(0, 60) : base
       }
-      await api('/api/rules', { method: 'PUT', body: { rule: r, previousId } })
+      await api('/api/rules', { method: 'PUT', body: { rule: r, previousId, version: meta.version } })
       onClose(true)
     } catch (e) {
       setError((e as Error).message)
+      // Fresh meta brings the new version; the draft stays, so saving again is a deliberate overwrite.
+      if (isConflict(e)) reload?.()
     }
   }
 
