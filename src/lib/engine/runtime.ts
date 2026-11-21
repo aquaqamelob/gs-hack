@@ -13,6 +13,8 @@ export interface Runtime {
   fields: CustomField[]
   recipients: Recipient[]
   defaultOwner: string
+  /** Content hash of rules/recipients/fields YAML as last loaded; the `version` for optimistic concurrency. */
+  configVersions: Record<'rules' | 'recipients' | 'fields', string>
   runbooks: Map<string, Runbook>
   actions: Record<string, WebhookAction & { approval?: 'none' | 'required'; description?: string }>
   schemas: Map<string, SchemaRecord>
@@ -34,6 +36,7 @@ export function rt(): Runtime {
       fields: [],
       recipients: [],
       defaultOwner: 'team-platform',
+      configVersions: { rules: '', recipients: '', fields: '' },
       runbooks: new Map(),
       actions: {},
       schemas: new Map(),
