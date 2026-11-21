@@ -25,7 +25,7 @@ export default function RulesPage() {
     window.addEventListener('actor-changed', onActor)
     return () => window.removeEventListener('actor-changed', onActor)
   }, [load])
-  useLive({ onChanged: (k) => k.includes('config:config') && void load() })
+  useLive({ onChanged: (k) => (k.includes('config:rules') || k.includes('config:all')) && void load() })
 
   if (!meta) return <Text>Loading…</Text>
   const isAdmin = meta.me.role === 'admin'
@@ -56,8 +56,11 @@ export default function RulesPage() {
         <div>
           <Heading>Rules</Heading>
           <Text>
-            Each rule decides which events become alerts, who is told and how the alert looks. Stored in{' '}
-            <code>config/rules.yaml</code> — edits from here, the API or the file apply immediately.
+            Each rule decides which events become alerts, who is told and how the alert looks. Stored in Postgres
+            (seeded from <code>config/rules.yaml</code> on first boot); a save reaches every instance within seconds.{' '}
+            <a className="underline" href="/api/rules/export">
+              Export as YAML
+            </a>
           </Text>
         </div>
         {isAdmin && !editing && (

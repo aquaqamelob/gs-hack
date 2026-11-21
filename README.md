@@ -27,7 +27,7 @@ Three instances behind the load balancer:
 APP_REPLICAS=3 docker compose up --build
 ```
 
-All replicas share one `config/` directory (bind mount from the repo). Edit it from the UI or in git: every replica hot-reloads within about 1 s, and the change survives `docker compose restart app`. Writes from the UI are serialized across replicas with a Postgres advisory lock and always start from the file on disk, so two concurrent edits never overwrite each other; a save based on a stale copy gets `409` and the UI reloads.
+Config (rules, recipients, custom fields, runbooks) lives in Postgres, like everything else; `config/` only seeds it on first boot. A save from any replica reaches every replica within milliseconds (`pg_notify`, plus a 5 s version check as a fallback). Each save locks the row and starts from what is stored, so two concurrent edits never overwrite each other; a save based on a stale copy gets `409` and the UI reloads. `GET /api/rules/export` gives the current rules as YAML for git.
 
 Stop with `Ctrl+C`; `docker compose down -v` also deletes the database.
 
@@ -59,7 +59,7 @@ Simulate an outage: `docker compose stop mock-gateway`, trigger an alert, watch 
 
 | Service | Role |
 | --- | --- |
-| `app` | CTRL (Next.js on Bun). Stateless, scale with `APP_REPLICAS`; `config/` is a bind mount shared by all replicas |
+| `app` | CTRL (Next.js on Bun). Stateless, scale with `APP_REPLICAS` |
 | `lb` | nginx in front of the app replicas (SSE buffering off) |
 | `postgres` | the only state: events, schemas, alerts, outbox, audit log |
 | `redpanda` | Kafka-compatible broker |
@@ -91,15 +91,15 @@ bun run smoke                    # 28 end-to-end checks against the running stac
 
 - **Ingest:** unknown schemas are never rejected (202); malformed JSON is 400, bad credentials 401. Events are written in batches in one transaction together with alert upserts and outbox rows.
 - **Schema mapping:** fingerprint = sorted key paths, mapping stored in Postgres. No model call on the alert path. Unmapped events that match no rule go to the Unassigned inbox and to the default owner (`unmapped_events_total`).
-- **Rules:** `config/rules.yaml`, hot-reloaded. Ops `eq, neq, in, not_in, gt, gte, lt, lte, regex, glob, exists`, nested `all`/`any`. Grouping like Alertmanager: `group_by`, `group_wait`, `group_interval`, `dedup_window`. The editor previews a rule against the last 100 events.
+- **Rules:** stored in Postgres (`config_docs`, seeded from `config/rules.yaml` on first boot); a save from any instance is broadcast with `pg_notify` and every instance reloads. `GET /api/rules/export` returns them as YAML. Recipients, custom fields and runbooks work the same way. Ops `eq, neq, in, not_in, gt, gte, lt, lte, regex, glob, exists`, nested `all`/`any`. Grouping like Alertmanager: `group_by`, `group_wait`, `group_interval`, `dedup_window`. The editor previews a rule against the last 100 events.
 - **Delivery:** transactional outbox claimed with `FOR UPDATE SKIP LOCKED`, exponential backoff with jitter, dead-letter queue with requeue. Idempotency key = alert + notification + channel + recipient. Per-person channel preferences and working hours.
-- **People, filters and admin:** SSO is mocked — you pick who you are in the bottom-left corner and the console sends that id in `x-actor`. The role comes from `config/recipients.yaml` (`role: admin`), never from the request. **My view** (`/me`) shows a person's live alerts (their own plus those of the teams in `teams:` or where they are on call), their personal filters and their channel preferences. A person can create, pause, edit and delete only their own filters (a rule owned by them that notifies only them) and change only their own preferences. An **admin** changes every rule, including team filters, and every recipient, including roles and team membership. The API enforces this (403 otherwise); the YAML files stay editable by whoever can edit the files.
-- **Runbooks:** `config/runbooks/` in YAML, Markdown or free text. One action kind, a webhook, configured by name in `config/actions.yaml`; targets allow-listed, secrets only from env. Approval in the UI or by replying `YES <code>` (expires after 1 h). Everything goes to the audit log.
+- **People, filters and admin:** SSO is mocked — you pick who you are in the bottom-left corner and the console sends that id in `x-actor`. The role comes from the recipients config (`role: admin`), never from the request. **My view** (`/me`) shows a person's live alerts (their own plus those of the teams in `teams:` or where they are on call), their personal filters and their channel preferences. A person can create, pause, edit and delete only their own filters (a rule owned by them that notifies only them) and change only their own preferences. An **admin** changes every rule, including team filters, and every recipient, including roles and team membership. The API enforces this (403 otherwise).
+- **Runbooks:** YAML, Markdown or free text (seeded from `config/runbooks/`). One action kind, a webhook, configured by name in `config/actions.yaml`; targets allow-listed, secrets only from env. Approval in the UI or by replying `YES <code>` (expires after 1 h). Everything goes to the audit log.
 
 ## Layout
 
 ```
-config/          rules.yaml, recipients.yaml, actions.yaml, fields.yaml, runbooks/ (shared by all replicas)
+config/          seed files: rules.yaml, recipients.yaml, fields.yaml, runbooks/ (copied to Postgres on first boot); actions.yaml
 db/schema.sql    Postgres schema (applied on start under an advisory lock)
 src/lib/engine/  pipeline, schemas, rules, outbox, channels, alerts, runbooks, actions, kafka, auth
 src/app/api/     ingest, stream (SSE), alerts, rules, schemas, runbooks, recipients, me, reply, system, metrics

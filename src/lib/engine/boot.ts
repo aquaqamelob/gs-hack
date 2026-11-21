@@ -1,6 +1,6 @@
 import { alertFromRow } from './alerts'
 import { listen } from './bus'
-import { loadAll, watchConfig } from './config'
+import { loadAll, reloadConfig, seedConfig, watchConfig } from './config'
 import { db, migrate } from './db'
 import { startKafka } from './kafka'
 import { OUTBOX_CHANNEL, scheduleTick, wakeDispatcher } from './outbox'
@@ -23,13 +23,20 @@ export function boot(): Promise<void> {
   const r = rt()
   r.booted ??= (async () => {
     await migrate()
-    loadAll()
+    await seedConfig()
+    await loadAll()
     await listen()
     await db().listen(OUTBOX_CHANNEL, () => wakeDispatcher())
     r.bus.on('change', (e) => {
       if (e.type === 'schema') invalidateSchema(e.id)
     })
-    watchConfig((what) => r.bus.emit('change', { type: 'config', what }))
+    // Another instance saved config: reload from Postgres first, then tell SSE clients, so their refetch sees it.
+    r.bus.on('config', (e) =>
+      void reloadConfig()
+        .then(() => r.bus.emit('change', e))
+        .catch((err) => console.error('[config] reload failed:', (err as Error).message))
+    )
+    watchConfig(() => r.bus.emit('change', { type: 'config', what: 'all' }))
     setInterval(wakeDispatcher, 250).unref?.()
     setInterval(safe('scheduler', () => scheduleTick(alertFromRow as never)), 500).unref?.()
     setInterval(safe('schema counts', flushSchemaCounts), 2000).unref?.()

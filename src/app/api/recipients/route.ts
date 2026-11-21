@@ -53,14 +53,14 @@ export async function PUT(req: Request) {
       delete r.teams
     }
     const who = me(req, body)
-    // Checks against other recipients run on the file as it is now, under the global config lock.
+    // Checks against other recipients run on the doc as stored in Postgres now, under the row lock.
     const exists = await updateRecipients((all) => {
       if (r.teams && !r.teams.every((t) => all.some((x) => x.id === t && x.kind === 'team')))
         throw new ConfigError('teams must list existing team ids')
       const previous = all.find((x) => x.id === r.id)
       assertCanEditRecipient(who, r, previous)
       return { recipients: previous ? all.map((x) => (x.id === r.id ? r : x)) : [...all, r], result: Boolean(previous) }
-    }, body.version)
+    }, body.version, actorOf(req, body))
     await audit(
       actorOf(req, body),
       exists ? 'recipient.updated' : 'recipient.created',

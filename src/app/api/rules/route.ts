@@ -39,7 +39,7 @@ export async function PUT(req: Request) {
     const replaceId = body.previousId ?? rule.id
     const clean = JSON.parse(JSON.stringify(rule)) as Rule & { summary?: string }
     delete clean.summary
-    // Conflict checks run on the rules as they are on disk now, under the global config lock.
+    // Conflict checks run on the rules as stored in Postgres now, under the row lock.
     const exists = await updateRules((rules) => {
       const previous = rules.find((x) => x.id === replaceId)
       if (!previous && rules.some((x) => x.id === rule.id)) throw new ConfigError(`Rule id "${rule.id}" already exists`)
@@ -50,7 +50,7 @@ export async function PUT(req: Request) {
         rules: previous ? rules.map((x) => (x.id === replaceId ? clean : x)) : [...rules, clean],
         result: Boolean(previous),
       }
-    }, body.version)
+    }, body.version, actorOf(req, body))
     await audit(actorOf(req, body), exists ? 'rule.updated' : 'rule.created', rule.id, describeCondition(rule.when))
     return json({ ok: true, rule: clean, version: configVersion('rules') })
   })
@@ -67,7 +67,7 @@ export async function DELETE(req: Request) {
       if (!previous) throw new ConfigError('Unknown rule', 404)
       assertCanEditRule(who, null, previous)
       return { rules: rules.filter((x) => x.id !== id) }
-    }, params.get('version') ?? undefined)
+    }, params.get('version') ?? undefined, actorOf(req))
     await audit(actorOf(req), 'rule.deleted', id)
     return json({ ok: true, version: configVersion('rules') })
   })

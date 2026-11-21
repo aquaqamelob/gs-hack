@@ -30,7 +30,7 @@ export function useActor() {
 export type Me = { id: string; name: string; role: 'admin' | 'user'; teams: string[]; known: boolean }
 export type Person = { id: string; name: string; role: 'admin' | 'user' }
 
-/** The acting person and their role (role comes from config/recipients.yaml on the server). */
+/** The acting person and their role (role comes from the recipients config on the server). */
 export function useMe() {
   const [actor] = useActor()
   const [data, setData] = useState<{ me: Me; people: Person[] } | null>(null)
@@ -40,7 +40,7 @@ export function useMe() {
       .catch(() => setData(null))
   }, [])
   useEffect(() => load(), [actor, load])
-  useLive({ onChanged: (k) => k.includes('config:config') && load() })
+  useLive({ onChanged: (k) => (k.includes('config:recipients') || k.includes('config:all')) && load() })
   return { me: data?.me ?? null, people: data?.people ?? [], isAdmin: data?.me.role === 'admin', reload: load }
 }
 
