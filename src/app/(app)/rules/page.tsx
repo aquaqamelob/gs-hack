@@ -8,12 +8,14 @@ import { api, isConflict, useLive } from '@/lib/client'
 import type { Rule } from '@/lib/engine/types'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
+import { ProposalList, useProposals } from '../proposals'
 import { RuleEditor, RuleSummary, type Meta, type RuleRow } from './rule-editor'
 
 export default function RulesPage() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [editing, setEditing] = useState<Rule | 'new' | null>(null)
   const [error, setError] = useState('')
+  const proposals = useProposals()
 
   const load = useCallback(async () => setMeta(await api<Meta>('/api/rules')), [])
   useEffect(() => {
@@ -126,6 +128,15 @@ export default function RulesPage() {
                 </div>
               )}
             </div>
+            <ProposalList
+              items={proposals.items}
+              target={`rule:${r.id}`}
+              isAdmin={isAdmin}
+              onDone={() => {
+                proposals.reload()
+                void load()
+              }}
+            />
           </li>
         ))}
       </ul>

@@ -232,5 +232,71 @@ const exported = await (await fetch(`${B}/api/rules/export`)).text()
 check('GET /api/rules/export returns the rules as YAML', exported.startsWith('rules:') && exported.includes(`id: ${r1}`))
 for (const rid of [r1, r2, r3]) await send('DELETE', `/api/rules?id=${rid}`)
 
+// 12. Noise budget: the preview replays recent events through the rule and counts messages per recipient × channel.
+const settlementsRule = (await call('/api/rules')).rules.find((r: any) => r.id === 'settlements-workflow-failed')
+const nb = (await call('/api/rules/test', { rule: settlementsRule })).budget
+check(
+  'noise budget: grouping folds matched events into fewer notifications',
+  nb.events > 0 && nb.notifications > 0 && nb.notifications < nb.events,
+  `${nb.events} events → ${nb.notifications} notifications`
+)
+check(
+  'noise budget: lists SMS for the on-call route',
+  nb.lines.some((l: any) => l.channel === 'sms' && l.count > 0),
+  nb.lines.map((l: any) => `${l.name} ${l.count}× ${l.channel}`).join(', ')
+)
+
+// 13. Propose a fix from an alert: listed under the rule, only an admin decides.
+const fixRes = await send('POST', '/api/proposals', { alertId: id, reason: 'too-noisy', text: `smoke proposal ${run}` })
+check('propose a fix from an alert', fixRes.status === 200 && fixRes.data.proposal?.target === 'rule:settlements-workflow-failed', `${fixRes.status}`)
+const fixId = fixRes.data.proposal?.id
+check('proposal listed as open', (await call('/api/proposals')).proposals.some((p: any) => p.id === fixId))
+const asAnna = await fetch(`${B}/api/proposals/${fixId}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-actor': 'anna' }, body: JSON.stringify({ op: 'dismiss' }) })
+check('non-admin cannot decide a proposal (403)', asAnna.status === 403, `${asAnna.status}`)
+check('admin dismisses the proposal', (await send('POST', `/api/proposals/${fixId}`, { op: 'dismiss' })).status === 200)
+
+// 14. Runbooks learn from resolved incidents: "what fixed it" → templated proposal → accept → next alert has the step.
+const learnId = `smoke-learn-${run}`
+await send('POST', '/api/runbooks', { id: learnId, format: 'markdown', content: '# Smoke learn\n\n1. Check the settlement dashboard\n' })
+await send('PUT', '/api/rules', {
+  rule: {
+    id: learnId,
+    name: `Smoke learn ${run}`,
+    team: 'team-platform',
+    when: { all: [{ field: 'type', op: 'eq', value: 'SMOKE_LEARN' }, { field: 'run', op: 'eq', value: run }] },
+    notify: [{ to: 'team-platform', channels: ['ui'] }],
+    group_by: ['workflowId'],
+    runbook: learnId,
+  },
+})
+const learnEvent = (n: number) => ({ type: 'SMOKE_LEARN', run, workflowId: `WF-LEARN-${run}-${n}`, service: 'settlement', severity: 'ERROR' })
+const resolveWith = async (n: number) => {
+  const r = await call('/ingest/events', learnEvent(n))
+  const aid = r.alertIds[0]
+  await call(`/api/alerts/${aid}`, { op: 'resolve', fixed: ['Check the settlement dashboard', `Restart counterparty-service, then retry WF-LEARN-${run}-${n}`] })
+  return aid
+}
+await resolveWith(1)
+await resolveWith(2)
+const learned = (await call('/api/proposals')).proposals.filter((p: any) => p.target === `runbook:${learnId}`)
+check('existing runbook step is not proposed again', learned.length === 1, learned.map((p: any) => p.text).join(' | '))
+check(
+  'learned step is templated and merged across incidents',
+  learned[0]?.text === 'Restart counterparty-service, then retry {{workflowId}}' && learned[0]?.seen === 2,
+  `${learned[0]?.text} (seen ${learned[0]?.seen})`
+)
+const accepted = await send('POST', `/api/proposals/${learned[0]?.id}`, { op: 'accept' })
+check('admin accepts: step added to the runbook', accepted.status === 200, accepted.data.applied ?? accepted.data.error)
+const next = await call('/ingest/events', learnEvent(3))
+const nextAlert = await alertOf(next.alertIds[0])
+check(
+  'next alert shows the learned step, filled in',
+  nextAlert.steps.some((s: any) => s.text === `Restart counterparty-service, then retry WF-LEARN-${run}-3`),
+  nextAlert.steps.map((s: any) => s.text).join(' | ')
+)
+await call(`/api/alerts/${nextAlert.id}`, { op: 'resolve' })
+await send('DELETE', `/api/rules?id=${learnId}`)
+await send('POST', `/api/runbooks/${learnId}`, { op: 'delete' })
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
 process.exit(failures ? 1 : 0)

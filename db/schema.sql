@@ -132,3 +132,24 @@ CREATE TABLE IF NOT EXISTS config_docs (
   updated_at timestamptz NOT NULL DEFAULT now(),
   updated_by text        NOT NULL
 );
+
+-- "Propose a fix" (manual, from an alert) and runbook steps learned from resolved alerts (learned).
+-- target: 'rule:<id>' or 'runbook:<id>'. An open learned proposal with the same normalised step merges (seen + 1).
+CREATE TABLE IF NOT EXISTS proposals (
+  id          bigserial PRIMARY KEY,
+  kind        text        NOT NULL,
+  target      text        NOT NULL,
+  reason      text        NOT NULL,
+  text        text        NOT NULL,
+  patch       jsonb,
+  fingerprint text        NOT NULL,
+  alert_ids   text[]      NOT NULL DEFAULT '{}',
+  seen        integer     NOT NULL DEFAULT 1,
+  status      text        NOT NULL DEFAULT 'open',
+  created_by  text        NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  decided_by  text,
+  decided_at  timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS proposals_open_fp ON proposals (target, fingerprint) WHERE status = 'open';

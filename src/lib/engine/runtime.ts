@@ -59,3 +59,4 @@ export type BusEvent =
   | { type: 'schema'; id: string }
   | { type: 'config'; what: string }
   | { type: 'audit' }
+  | { type: 'proposal' }

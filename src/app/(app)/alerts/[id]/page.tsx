@@ -4,8 +4,10 @@ import { Badge } from '@/components/badge'
 import { Button } from '@/components/button'
 import { Heading, Subheading } from '@/components/heading'
 import { Input } from '@/components/input'
+import { Select } from '@/components/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/table'
 import { Text } from '@/components/text'
+import { Textarea } from '@/components/textarea'
 import { COLOR_BAR, COLOR_TEXT, SEVERITY_BADGE, api, timeAgo, useLive, useNow } from '@/lib/client'
 import type { Alert, AlertStep, AuditEntry, Delivery, Runbook } from '@/lib/engine/types'
 import Link from 'next/link'
@@ -117,6 +119,10 @@ export default function AlertPage({ params }: { params: { id: string } }) {
   const [runbook, setRunbook] = useState<Runbook | null>(null)
   const [error, setError] = useState('')
   const [note, setNote] = useState('')
+  const [fixed, setFixed] = useState('')
+  const [proposing, setProposing] = useState(false)
+  const [fix, setFix] = useState({ reason: 'too-noisy', text: '' })
+  const [notice, setNotice] = useState('')
   const now = useNow(5000)
 
   const load = useCallback(async () => {
@@ -207,19 +213,32 @@ export default function AlertPage({ params }: { params: { id: string } }) {
             </Button>
           )}
           {!closed && (
-            <>
+            <div className="flex w-full flex-wrap items-start gap-2">
               <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Resolution note (optional)" className="max-w-sm" />
+              <Textarea
+                value={fixed}
+                onChange={(e) => setFixed(e.target.value)}
+                rows={2}
+                className="max-w-md"
+                placeholder={'What fixed it? One step per line (optional).\nSteps the runbook does not have yet are suggested for it.'}
+              />
               <Button
                 color="green"
                 onClick={async () => {
-                  await op('resolve', { note: note || undefined })
+                  const lines = fixed.split('\n').filter((l) => l.trim())
+                  await op('resolve', { note: note || undefined, fixed: lines })
                   setNote('')
+                  setFixed('')
+                  if (lines.length) setNotice('Thanks. New steps were suggested for the runbook; an admin reviews them on the Runbooks page.')
                 }}
               >
                 Resolve
               </Button>
-            </>
+            </div>
           )}
+          <Button outline onClick={() => setProposing((x) => !x)}>
+            Propose a fix
+          </Button>
           {closed && (
             <>
               <Text>
@@ -236,6 +255,43 @@ export default function AlertPage({ params }: { params: { id: string } }) {
             {alert.approvalCode}” from a phone or email this alert was sent to)
           </span>
         </div>
+
+        {proposing && (
+          <div className="mt-4 flex flex-wrap items-start gap-2 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
+            <Select value={fix.reason} onChange={(e) => setFix({ ...fix, reason: e.target.value })} className="w-auto">
+              <option value="too-noisy">Too noisy</option>
+              <option value="wrong-team">Wrong team</option>
+              <option value="wrong-severity">Wrong severity</option>
+              <option value="runbook-step-wrong">Runbook step is wrong</option>
+              <option value="missing-step">A step is missing</option>
+              <option value="other">Other</option>
+            </Select>
+            <Textarea
+              value={fix.text}
+              onChange={(e) => setFix({ ...fix, text: e.target.value })}
+              rows={2}
+              className="max-w-lg"
+              placeholder="What should change? e.g. group these per instrument, or page counterparty-support instead"
+            />
+            <Button
+              color="dark/zinc"
+              disabled={!fix.text.trim()}
+              onClick={async () => {
+                try {
+                  await api('/api/proposals', { body: { alertId: alert.id, ...fix } })
+                  setProposing(false)
+                  setFix({ reason: 'too-noisy', text: '' })
+                  setNotice('Proposal sent. It is listed under this rule on the Rules page for an admin to act on.')
+                } catch (e) {
+                  setNotice((e as Error).message)
+                }
+              }}
+            >
+              Send proposal
+            </Button>
+          </div>
+        )}
+        {notice && <Text className="mt-3 font-medium">{notice}</Text>}
 
         {/* Level 3: raw JSON, collapsed */}
         <details className="mt-6">

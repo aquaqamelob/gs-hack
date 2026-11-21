@@ -7,9 +7,10 @@ import { Input } from '@/components/input'
 import { Select } from '@/components/select'
 import { Text } from '@/components/text'
 import { Textarea } from '@/components/textarea'
-import { api, useLive } from '@/lib/client'
+import { api, useLive, useMe } from '@/lib/client'
 import type { Runbook, StepDef } from '@/lib/engine/types'
 import { useCallback, useEffect, useState } from 'react'
+import { ProposalList, useProposals } from '../proposals'
 
 type RunbookRow = Runbook
 type Data = {
@@ -125,6 +126,8 @@ export default function RunbooksPage() {
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
+  const proposals = useProposals()
+  const { isAdmin } = useMe()
 
   const load = useCallback(async () => {
     const d = await api<Data>('/api/runbooks')
@@ -191,6 +194,9 @@ export default function RunbooksPage() {
                 <div className="truncate font-medium">{r.title}</div>
                 <div className="text-xs text-zinc-500">
                   {r.file} · {r.steps.length} steps
+                  {proposals.items.some((p) => p.target === `runbook:${r.id}`) && (
+                    <span className="ml-1 text-sky-600">· suggestions</span>
+                  )}
                 </div>
               </button>
             </li>
@@ -209,6 +215,15 @@ export default function RunbooksPage() {
                 <span className="text-sm text-zinc-500">used by {data.usedBy[rb.id].join(', ')}</span>
               ) : null}
             </div>
+            <ProposalList
+              items={proposals.items}
+              target={`runbook:${rb.id}`}
+              isAdmin={isAdmin}
+              onDone={() => {
+                proposals.reload()
+                void load()
+              }}
+            />
             {rb.matches && (
               <Text>
                 Auto-attaches to alerts where{' '}
