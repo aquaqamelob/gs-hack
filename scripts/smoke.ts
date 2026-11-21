@@ -164,5 +164,45 @@ check(
   later.map((g: any) => g.deliveries.length).join(',')
 )
 
+// 11. Config shared by every replica: a UI edit reaches all of them, stale saves get 409, concurrent saves both land.
+async function send(method: string, path: string, body?: unknown) {
+  const res = await fetch(B + path, {
+    method,
+    headers: { 'content-type': 'application/json', 'x-actor': 'admin' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  return { status: res.status, data: await res.json().catch(() => ({})) }
+}
+const probeRule = (rid: string) => ({
+  id: rid,
+  name: `Smoke probe ${rid}`,
+  team: 'team-platform',
+  enabled: false,
+  when: { field: 'title', op: 'eq', value: `SMOKE_PROBE_${run}` },
+  notify: [{ to: 'team-platform', channels: ['ui'] }],
+})
+const [r1, r2, r3] = ['a', 'b', 'c'].map((x) => `smoke-${x}-${run}`)
+const v0 = (await call('/api/rules')).version as string
+const put1 = await send('PUT', '/api/rules', { rule: probeRule(r1), version: v0 })
+check('rule saved with the current version', put1.status === 200, `${put1.status} ${JSON.stringify(put1.data)}`)
+await sleep(1500)
+const seen = await Promise.all(Array.from({ length: 10 }, () => call('/api/rules')))
+check(
+  'new rule visible on every replica within 1.5 s (10 GETs via the LB)',
+  seen.every((x) => x.rules.some((y: any) => y.id === r1)),
+  `${seen.filter((x) => x.rules.some((y: any) => y.id === r1)).length}/10`
+)
+const stale = await send('PUT', '/api/rules', { rule: probeRule(r2), version: v0 })
+check('save with a stale version rejected with 409', stale.status === 409, `${stale.status} ${stale.data.error ?? ''}`)
+const both = await Promise.all([send('PUT', '/api/rules', { rule: probeRule(r2) }), send('PUT', '/api/rules', { rule: probeRule(r3) })])
+await sleep(1500)
+const after = (await call('/api/rules')).rules.map((y: any) => y.id)
+check(
+  'two concurrent saves on different replicas both land in the file',
+  both.every((x) => x.status === 200) && after.includes(r2) && after.includes(r3),
+  both.map((x) => x.status).join(',')
+)
+for (const rid of [r1, r2, r3]) await send('DELETE', `/api/rules?id=${rid}`)
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
 process.exit(failures ? 1 : 0)
