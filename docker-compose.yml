@@ -1,6 +1,6 @@
 # One command: docker compose up --build   →  http://localhost:3000
 # Scale the stateless app: APP_REPLICAS=3 docker compose up --build
-# State: Postgres, plus the config/ directory bind-mounted into every replica.
+# Postgres is the only stateful component (config included; config/ in the image only seeds it).
 services:
   postgres:
     image: postgres:16-alpine
@@ -34,6 +34,10 @@ services:
   # SMS / phone gateway mock and the target of runbook webhooks.
   mock-gateway:
     build: ./mock-gateway
+    environment:
+      # Inbound replies go to CTRL through the load balancer, signed like a provider webhook.
+      CTRL_REPLY_URL: http://lb/api/reply
+      REPLY_HMAC: dev-reply-hmac
     networks:
       default:
         aliases: [counterparty-service, workflow-api, escalation-api]
@@ -43,9 +47,6 @@ services:
     build: .
     deploy:
       replicas: ${APP_REPLICAS:-1}
-    # One config/ shared by every replica (and by git): edits from the UI land on the host and the
-    # other replicas pick them up within ~1 s (mtime polling). `:z` lets SELinux hosts share the mount.
-    volumes: ["./config:/app/config:z"]
     depends_on:
       postgres: { condition: service_healthy }
       redpanda: { condition: service_healthy }
@@ -62,6 +63,9 @@ services:
       ACTION_ALLOWED_HOSTS: counterparty-service,workflow-api,escalation-api
       INGEST_TOKEN_PARTNER: dev-partner-token
       INGEST_HMAC_PAYMENTS: dev-payments-hmac
+      # SMS/email reply webhook (/api/reply): HMAC from the gateway, bearer for scripts.
+      INGEST_HMAC_REPLY: dev-reply-hmac
+      INGEST_TOKEN_REPLY: dev-reply-token
 
   lb:
     image: nginx:1.27-alpine

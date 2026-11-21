@@ -1,6 +1,6 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
 import { audit } from '@/lib/engine/bus'
-import { deleteRunbookFile } from '@/lib/engine/config'
+import { deleteRunbook } from '@/lib/engine/config'
 import { rt } from '@/lib/engine/runtime'
 
 export const dynamic = 'force-dynamic'
@@ -14,7 +14,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     switch (body.op) {
       case 'delete':
-        deleteRunbookFile(rb.id)
+        await deleteRunbook(rb.id, actor)
         await audit(actor, 'runbook.deleted', rb.id)
         return json({ ok: true })
       default:

@@ -144,7 +144,7 @@ export default function MyViewPage() {
     window.addEventListener('actor-changed', onActor)
     return () => window.removeEventListener('actor-changed', onActor)
   }, [load])
-  useLive({ onChanged: (k) => k.includes('config:config') && void load() })
+  useLive({ onChanged: (k) => k.some((x) => x.startsWith('config:')) && void load() })
 
   const me = meta?.me
   const self = recipients.find((r) => r.id === me?.id)
@@ -162,7 +162,7 @@ export default function MyViewPage() {
       <>
         <Heading>My view</Heading>
         <Text className="mt-2">
-          “{me.id}” is not a person in <code>config/recipients.yaml</code>. Pick yourself in the bottom-left corner.
+          “{me.id}” is not a person on the People page. Pick yourself in the bottom-left corner.
         </Text>
       </>
     )

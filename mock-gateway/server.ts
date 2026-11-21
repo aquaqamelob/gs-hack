@@ -19,6 +19,11 @@ function record(m: Omit<Message, 'id' | 'at'>) {
 
 const json = (data: unknown, status = 200) => Response.json(data, { status })
 
+// Inbound replies are forwarded to CTRL like a real provider webhook, signed with HMAC-SHA256 of the body.
+const replyUrl = process.env.CTRL_REPLY_URL ?? 'http://localhost:3000/api/reply'
+const replyHmac = process.env.REPLY_HMAC ?? ''
+const sign = (body: string) => new Bun.CryptoHasher('sha256', replyHmac).update(body).digest('hex')
+
 Bun.serve({
   port,
   hostname: '0.0.0.0',
@@ -41,6 +46,24 @@ Bun.serve({
       return json({ down })
     }
     if (down) return json({ error: 'gateway unavailable' }, 503)
+
+    // Simulated inbound SMS/email reply: {from, text} → signed POST to CTRL /api/reply. Returns CTRL's answer.
+    if (path === '/inbound' && req.method === 'POST') {
+      const inbound = (await req.json().catch(() => ({}))) as { from?: string; text?: string }
+      const body = JSON.stringify({ from: String(inbound.from ?? ''), text: String(inbound.text ?? '') })
+      record({ channel: 'inbound', to: 'ctrl', text: body, key: '' })
+      try {
+        const res = await fetch(replyUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(replyHmac ? { 'x-signature': `sha256=${sign(body)}` } : {}) },
+          body,
+          signal: AbortSignal.timeout(10_000),
+        })
+        return new Response(await res.text(), { status: res.status, headers: { 'content-type': 'application/json' } })
+      } catch (e) {
+        return json({ error: `cannot reach CTRL: ${(e as Error).message}` }, 502)
+      }
+    }
 
     if ((path === '/sms' || path === '/phone') && req.method === 'POST') {
       const body = (await req.json().catch(() => ({}))) as { to?: string; text?: string; key?: string }

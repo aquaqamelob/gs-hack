@@ -7,7 +7,7 @@ import type { CustomField } from '@/lib/engine/types'
 
 export const dynamic = 'force-dynamic'
 
-/** Custom canonical fields (config/fields.yaml). */
+/** Custom canonical fields (stored in Postgres; config/fields.yaml only seeds them). */
 export async function GET() {
   return handle(async () => json({ fields: rt().fields }))
 }
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     const exists = await updateFields((fields) => {
       const found = fields.some((x) => x.key === field.key)
       return { fields: found ? fields.map((x) => (x.key === field.key ? field : x)) : [...fields, field], result: found }
-    })
+    }, undefined, actorOf(req, body))
     const actor = actorOf(req, body)
     await audit(actor, exists ? 'field.updated' : 'field.created', field.key, `${field.type}; synonyms: ${field.synonyms.join(', ')}`)
     if (body.map?.fingerprint && body.map.path) await setMapping(body.map.fingerprint, field.key, body.map.path, actor)
@@ -49,7 +49,7 @@ export async function DELETE(req: Request) {
           409
         )
       return { fields: fields.filter((f) => f.key !== key) }
-    })
+    }, undefined, actorOf(req))
     const schemas = await dropField(key)
     await audit(actorOf(req), 'field.deleted', key, `removed from ${schemas} schema(s)`)
     return json({ ok: true })

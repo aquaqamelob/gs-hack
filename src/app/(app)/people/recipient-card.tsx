@@ -218,7 +218,7 @@ export function RecipientCard({
         </Button>
       )}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      {saved && !dirty && <Text className="mt-2">Saved to config/recipients.yaml</Text>}
+      {saved && !dirty && <Text className="mt-2">Saved. Every instance picks it up</Text>}
     </div>
   )
 }
