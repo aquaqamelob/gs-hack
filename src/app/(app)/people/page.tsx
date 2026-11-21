@@ -143,7 +143,7 @@ function RecipientCard({ r, all, onSaved }: { r: Row; all: Recipient[]; onSaved:
           Save preferences
         </Button>
       )}
-      {saved && !dirty && <Text className="mt-2">Saved to config/recipients.yaml</Text>}
+      {saved && !dirty && <Text className="mt-2">Saved. Every instance picks it up</Text>}
     </div>
   )
 }
@@ -204,7 +204,7 @@ export default function PeoplePage() {
   useEffect(() => {
     void load()
   }, [load])
-  useLive({ onChanged: (k) => k.includes('config:config') && void load(), onAlerts: () => void load() })
+  useLive({ onChanged: (k) => (k.includes('config:recipients') || k.includes('config:all')) && void load(), onAlerts: () => void load() })
 
   const shown = messages.filter((m) => !filter || m.channel === filter)
 
@@ -213,7 +213,7 @@ export default function PeoplePage() {
       <Heading>People & channels</Heading>
       <Text>
         Who prefers which channel for which severity, and when. A rule can name channels explicitly; otherwise these preferences
-        apply. Stored in <code>config/recipients.yaml</code>.
+        apply. Stored in Postgres, seeded from <code>config/recipients.yaml</code> on first boot.
       </Text>
 
       <div className="mt-8 grid gap-8 xl:grid-cols-2">

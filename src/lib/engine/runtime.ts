@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import type { Recipient, Rule, Runbook, SchemaRecord, WebhookAction } from './types'
 
 /**
- * Per-instance memory. Nothing here is authoritative: config comes from YAML files,
+ * Per-instance memory. Nothing here is authoritative: config is a cache of Postgres (config_docs),
  * the schema cache mirrors Postgres, counters are this instance's Prometheus metrics.
  */
 export interface Runtime {

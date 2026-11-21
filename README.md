@@ -89,14 +89,14 @@ bun run smoke                    # 28 end-to-end checks against the running stac
 
 - **Ingest:** unknown schemas are never rejected (202); malformed JSON is 400, bad credentials 401. Events are written in batches in one transaction together with alert upserts and outbox rows.
 - **Schema mapping:** fingerprint = sorted key paths, mapping stored in Postgres. No model call on the alert path. Unmapped events that match no rule go to the Unassigned inbox and to the default owner (`unmapped_events_total`).
-- **Rules:** `config/rules.yaml`, hot-reloaded. Ops `eq, neq, in, not_in, gt, gte, lt, lte, regex, glob, exists`, nested `all`/`any`. Grouping like Alertmanager: `group_by`, `group_wait`, `group_interval`, `dedup_window`. The editor previews a rule against the last 100 events.
+- **Rules:** stored in Postgres (`config_docs`, seeded from `config/rules.yaml` on first boot); a save from any instance is broadcast with `pg_notify` and every instance reloads. `GET /api/rules/export` returns them as YAML. Recipients and runbooks work the same way. Ops `eq, neq, in, not_in, gt, gte, lt, lte, regex, glob, exists`, nested `all`/`any`. Grouping like Alertmanager: `group_by`, `group_wait`, `group_interval`, `dedup_window`. The editor previews a rule against the last 100 events.
 - **Delivery:** transactional outbox claimed with `FOR UPDATE SKIP LOCKED`, exponential backoff with jitter, dead-letter queue with requeue. Idempotency key = alert + notification + channel + recipient. Per-person channel preferences and working hours.
 - **Runbooks:** `config/runbooks/` in YAML, Markdown or free text. One action kind, a webhook, configured by name in `config/actions.yaml`; targets allow-listed, secrets only from env. Approval in the UI or by replying `YES <code>` (expires after 1 h). Everything goes to the audit log.
 
 ## Layout
 
 ```
-config/          rules.yaml, recipients.yaml, actions.yaml, runbooks/
+config/          seed files: rules.yaml, recipients.yaml, runbooks/ (copied to Postgres on first boot); actions.yaml
 db/schema.sql    Postgres schema (applied on start under an advisory lock)
 src/lib/engine/  pipeline, schemas, rules, outbox, channels, alerts, runbooks, actions, kafka, llm
 src/app/api/     ingest, stream (SSE), alerts, rules, schemas, runbooks, recipients, reply, system, metrics
