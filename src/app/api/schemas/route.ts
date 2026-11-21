@@ -1,7 +1,8 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
-import { CANONICAL_DESCRIPTIONS } from '@/lib/engine/schema'
+import { rt } from '@/lib/engine/runtime'
+import { canonicalDescriptions, isCanonicalKey } from '@/lib/engine/schema'
 import { getSchema, listSchemas, observeSchema, previewMapping, setMapping } from '@/lib/engine/schemas'
-import { CANONICAL_KEYS, type CanonicalKey, type Json } from '@/lib/engine/types'
+import { type CanonicalKey, type Json } from '@/lib/engine/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +10,8 @@ export async function GET() {
   return handle(async () =>
     json({
       schemas: await listSchemas(),
-      canonical: CANONICAL_DESCRIPTIONS,
+      canonical: canonicalDescriptions(),
+      fields: rt().fields,
     })
   )
 }
@@ -34,8 +36,8 @@ export async function POST(req: Request) {
     if (body.op === 'register') {
       const schema = await observeSchema(body.sample, source)
       for (const [key, path] of Object.entries(body.mapping ?? {})) {
-        if (CANONICAL_KEYS.includes(key as CanonicalKey))
-          await setMapping(schema.fingerprint, key as CanonicalKey, path || null, actorOf(req, body))
+        if (isCanonicalKey(key))
+          await setMapping(schema.fingerprint, key, path || null, actorOf(req, body))
       }
       return json({ schema: (await getSchema(schema.fingerprint)) ?? schema })
     }

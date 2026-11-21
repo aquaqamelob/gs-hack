@@ -1,6 +1,7 @@
 import { actorOf, fail, handle, json, readJson } from '@/lib/engine/api'
 import { approveSchema, decideProposal, getSchema, setMapping } from '@/lib/engine/schemas'
-import { CANONICAL_KEYS, type CanonicalKey } from '@/lib/engine/types'
+import { isCanonicalKey } from '@/lib/engine/schema'
+import { type CanonicalKey } from '@/lib/engine/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }>(req)
     const actor = actorOf(req, body)
     const needsKey = body.op === 'accept' || body.op === 'reject' || body.op === 'map'
-    if (needsKey && !CANONICAL_KEYS.includes(body.canonical as CanonicalKey))
+    if (needsKey && !isCanonicalKey(body.canonical))
       return fail('canonical must be a canonical key')
     switch (body.op) {
       case 'accept':

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { hostname } from 'node:os'
-import type { Recipient, Rule, Runbook, SchemaRecord, WebhookAction } from './types'
+import type { CustomField, Recipient, Rule, Runbook, SchemaRecord, WebhookAction } from './types'
 
 /**
  * Per-instance memory. Nothing here is authoritative: config comes from YAML files,
@@ -9,6 +9,8 @@ import type { Recipient, Rule, Runbook, SchemaRecord, WebhookAction } from './ty
 export interface Runtime {
   instance: string
   rules: Rule[]
+  /** Custom canonical fields from config/fields.yaml. */
+  fields: CustomField[]
   recipients: Recipient[]
   defaultOwner: string
   runbooks: Map<string, Runbook>
@@ -29,6 +31,7 @@ export function rt(): Runtime {
     g[KEY] = {
       instance: process.env.INSTANCE_ID || `${hostname()}-${process.pid}`,
       rules: [],
+      fields: [],
       recipients: [],
       defaultOwner: 'team-platform',
       runbooks: new Map(),

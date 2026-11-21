@@ -5,14 +5,15 @@ import { saveRules } from '@/lib/engine/config'
 import { db } from '@/lib/engine/db'
 import { describeCondition, OP_LABELS, validateRule } from '@/lib/engine/rules'
 import { rt } from '@/lib/engine/runtime'
-import { CANONICAL_KEYS, type FieldInfo, type Rule } from '@/lib/engine/types'
+import { allKeys } from '@/lib/engine/schema'
+import { type FieldInfo, type Rule } from '@/lib/engine/types'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
   return handle(async () => {
     const r = rt()
-    const fields = new Set<string>(['source', 'schema', ...CANONICAL_KEYS])
+    const fields = new Set<string>(['source', 'schema', ...allKeys()])
     const rows = await db()<{ fields: FieldInfo[] }[]>`select fields from schemas order by last_seen desc limit 100`
     for (const row of rows) for (const f of row.fields) fields.add(f.path)
     return json({
