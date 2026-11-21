@@ -289,6 +289,7 @@ export function RuleEditor({
     matched: number
     alerts: number
     samples: { title: string; schema: string }[]
+    budget: Budget
   } | null>(null)
   const previousId = initial?.id
 
@@ -546,6 +547,7 @@ export function RuleEditor({
         </div>
       )}
 
+      {test && <NoiseBudget budget={test.budget} />}
       {test && (
         <div className="mt-6 rounded-lg bg-zinc-50 p-4 text-sm dark:bg-zinc-800/50">
           <strong>
@@ -567,12 +569,64 @@ export function RuleEditor({
           Save (live, no restart)
         </Button>
         <Button outline onClick={runTest}>
-          Preview against last 100 events
+          Preview against recent events
         </Button>
         <Button plain onClick={() => onClose(false)}>
           Cancel
         </Button>
       </div>
+    </div>
+  )
+}
+
+type Budget = {
+  events: number
+  notifications: number
+  from: number | null
+  to: number | null
+  lines: { recipient: string; name: string; channel: string; count: number; outsideHours: number }[]
+}
+
+const CHANNEL_WORD: Record<string, string> = { sms: 'SMS', phone: 'phone call', email: 'email', ui: 'in the console' }
+
+function span(ms: number) {
+  const min = Math.round(ms / 60_000)
+  if (min < 1) return `${Math.max(1, Math.round(ms / 1000))} s`
+  if (min < 120) return `${min} min`
+  return `${Math.round(min / 60)} h`
+}
+
+/** "This rule would send: Anna 4× SMS (1 outside working hours), …" from a replay of recent events. */
+function NoiseBudget({ budget }: { budget: Budget }) {
+  if (!budget.events) return null
+  const loud = budget.lines.filter((l) => l.channel !== 'ui')
+  const window = budget.from !== null && budget.to !== null ? span(budget.to - budget.from) : ''
+  return (
+    <div className="mt-6 rounded-lg border border-amber-500/30 bg-amber-50 p-4 text-sm dark:bg-amber-500/10">
+      <strong>Noise budget.</strong>{' '}
+      {loud.length ? (
+        <>
+          This rule would send{' '}
+          {loud.map((l, i) => (
+            <span key={`${l.recipient}:${l.channel}`}>
+              {i > 0 && (i === loud.length - 1 ? ' and ' : ', ')}
+              <strong>
+                {l.name} {l.count}× {CHANNEL_WORD[l.channel] ?? l.channel}
+              </strong>
+              {l.outsideHours > 0 && <span className="text-red-600"> ({l.outsideHours} outside working hours)</span>}
+            </span>
+          ))}
+          .
+        </>
+      ) : (
+        <>This rule would only show alerts in the console, no messages.</>
+      )}{' '}
+      <span className="text-zinc-600 dark:text-zinc-400">
+        Based on the last {budget.events} matching event{budget.events === 1 ? '' : 's'}
+        {window ? ` over ${window}` : ''}, grouped into {budget.notifications} notification
+        {budget.notifications === 1 ? '' : 's'} with this rule&apos;s group_wait and group_interval, assuming nobody
+        acknowledges. Not extrapolated.
+      </span>
     </div>
   )
 }
