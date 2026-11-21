@@ -2,6 +2,7 @@ import { audit, publish } from './bus'
 import { db, ms, type Tx } from './db'
 import { count, rt } from './runtime'
 import {
+  bestFieldFor,
   computeMapping,
   describeFields,
   schemaName,
@@ -229,6 +230,53 @@ export async function approveSchema(fp: string, actor: string, name?: string) {
   })
   await audit(actor, 'schema.approved', s.name, JSON.stringify(s.mapping))
   return s
+}
+
+/**
+ * A custom field was just added: look for it in every stored schema. Confident matches are mapped right away
+ * (same thresholds as for a new schema), weaker ones wait as proposals. Schemas already mapping the key are left alone.
+ */
+export async function backfillField(key: CanonicalKey, actor: string) {
+  const used = (s: SchemaRecord) => new Set(Object.values(s.mapping) as string[])
+  const candidates = (await listSchemas()).filter(
+    (s) => !s.mapping[key] && bestFieldFor(key, s.sample, s.fields, used(s))
+  )
+  let mapped = 0
+  let proposed = 0
+  for (const c of candidates) {
+    await mutate(c.fingerprint, (s) => {
+      if (s.mapping[key]) return
+      const best = bestFieldFor(key, s.sample, s.fields, used(s))
+      if (!best) return
+      if (best.auto) {
+        s.mapping[key] = best.path
+        s.mappedBy[key] = best.by
+        s.confidence[key] = best.score
+        mapped++
+      } else if (!s.proposals.some((p) => p.canonical === key && p.path === best.path)) {
+        s.proposals.push({ canonical: key, path: best.path, confidence: best.score, by: 'fuzzy', reason: best.reason, state: 'pending' })
+        proposed++
+      }
+      recomputeStatus(s)
+    })
+  }
+  if (mapped || proposed) await audit(actor, 'schema.field-backfilled', key, `${mapped} mapped, ${proposed} to review`)
+  return { mapped, proposed }
+}
+
+/** A custom field was removed: drop its mapping and proposals everywhere so events stop carrying it. */
+export async function dropField(key: CanonicalKey) {
+  const rows = await db()<{ fingerprint: string }[]>`
+    select fingerprint from schemas where mapping ? ${key} or proposals @> ${db().json([{ canonical: key }] as never)}`
+  for (const { fingerprint } of rows)
+    await mutate(fingerprint, (s) => {
+      delete s.mapping[key]
+      delete s.mappedBy[key]
+      delete s.confidence[key]
+      s.proposals = s.proposals.filter((p) => p.canonical !== key)
+      recomputeStatus(s)
+    })
+  return rows.length
 }
 
 /** Dry run for the mapping screen: paste a sample, see what layers 1 and 2 would do. Nothing is stored. */

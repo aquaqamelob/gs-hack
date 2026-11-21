@@ -8,18 +8,19 @@ import { Select } from '@/components/select'
 import { Text } from '@/components/text'
 import { Textarea } from '@/components/textarea'
 import { api, timeAgo, useLevel, useLive, type Level } from '@/lib/client'
-import type { CanonicalKey, FieldInfo, Json, MappedBy, MappingProposal, SchemaRecord } from '@/lib/engine/types'
+import type { CanonicalKey, CustomField, CustomFieldType, FieldInfo, Json, MappedBy, MappingProposal, SchemaRecord } from '@/lib/engine/types'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 type Data = {
   schemas: SchemaRecord[]
   canonical: Record<CanonicalKey, string>
+  fields: CustomField[]
 }
 
 type Mapping = Partial<Record<CanonicalKey, string>>
 
-const KEYS: CanonicalKey[] = [
+const BUILTIN_ORDER: CanonicalKey[] = [
   'title',
   'severity',
   'service',
@@ -30,7 +31,7 @@ const KEYS: CanonicalKey[] = [
   'timestamp',
 ]
 
-const QUESTION: Record<CanonicalKey, string> = {
+const BUILTIN_QUESTION: Record<string, string> = {
   title: 'What kind of event is it?',
   severity: 'How serious is it?',
   service: 'Which system or app?',
@@ -40,6 +41,19 @@ const QUESTION: Record<CanonicalKey, string> = {
   entity_id: 'Which item is affected (order, trade, payment…)?',
   timestamp: 'When did it happen?',
 }
+
+/** Built-in keys in display order, then custom fields; shared by every component on the page. */
+type Keys = { all: CanonicalKey[]; custom: CustomField[]; question: (k: CanonicalKey) => string; isCustom: (k: CanonicalKey) => boolean }
+function makeKeys(custom: CustomField[]): Keys {
+  return {
+    all: [...BUILTIN_ORDER, ...custom.map((f) => f.key)],
+    custom,
+    question: (k) => BUILTIN_QUESTION[k] ?? custom.find((f) => f.key === k)?.question ?? custom.find((f) => f.key === k)?.description ?? k,
+    isCustom: (k) => custom.some((f) => f.key === k),
+  }
+}
+const KeysContext = createContext<Keys>(makeKeys([]))
+const useKeys = () => useContext(KeysContext)
 
 const BY_BADGE: Record<MappedBy, { color: 'zinc' | 'violet' | 'green' | 'sky' | 'amber'; label: string }> = {
   'known-format': { color: 'sky', label: 'known format' },
@@ -95,6 +109,7 @@ function MappingRow({
   description: string
   onChange: (path: string | null) => void
 }) {
+  const keys = useKeys()
   const known = !path || fields.some((f) => f.path === path)
   const [custom, setCustom] = useState(!known)
   const [draft, setDraft] = useState(path ?? '')
@@ -108,7 +123,14 @@ function MappingRow({
   return (
     <div className="grid items-center gap-x-4 gap-y-1 py-3 sm:grid-cols-[minmax(8rem,12rem)_minmax(12rem,1fr)_auto]">
       <div>
-        <div className="font-medium">{level === 'simple' ? QUESTION[k] : k}</div>
+        <div className="font-medium">
+          {level === 'simple' ? keys.question(k) : k}
+          {keys.isCustom(k) && level !== 'simple' && (
+            <Badge color="violet" className="ml-2">
+              custom
+            </Badge>
+          )}
+        </div>
         {level !== 'simple' && <div className="text-xs text-zinc-500">{description}</div>}
       </div>
       <div className="min-w-0">
@@ -191,9 +213,10 @@ function MappingEditor(props: {
   level: Level
   onChange: (k: CanonicalKey, path: string | null) => void
 }) {
+  const keys = useKeys()
   return (
     <div className="divide-y divide-zinc-950/5 dark:divide-white/5">
-      {KEYS.map((k) => (
+      {keys.all.map((k) => (
         <MappingRow
           key={k}
           k={k}
@@ -222,6 +245,7 @@ function Proposals({
   sample: Json
   onDecide: (p: MappingProposal, accept: boolean) => void
 }) {
+  const keys = useKeys()
   if (!proposals.length) return null
   return (
     <section>
@@ -237,7 +261,7 @@ function Proposals({
                 <>
                   We think <strong>{p.path}</strong>
                   {show(getPath(sample, p.path)) && <> (e.g. “{show(getPath(sample, p.path))}”)</>} answers{' '}
-                  <strong>{QUESTION[p.canonical].toLowerCase()}</strong>
+                  <strong>{keys.question(p.canonical).toLowerCase()}</strong>
                 </>
               ) : (
                 <>
@@ -317,6 +341,7 @@ function NewSchema({
   const [overrides, setOverrides] = useState<Partial<Record<CanonicalKey, string | null>>>({})
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [err, setErr] = useState('')
+  const keys = useKeys()
 
   useEffect(() => setShowJson((s) => s || level === 'expert'), [level])
 
@@ -417,9 +442,9 @@ function NewSchema({
               />
               <Select value={r.means} onChange={(e) => updateRow(i, { means: e.target.value as CanonicalKey | '' })}>
                 <option value="">{level === 'simple' ? 'let CTRL guess' : 'auto'}</option>
-                {KEYS.map((k) => (
+                {keys.all.map((k) => (
                   <option key={k} value={k}>
-                    {level === 'simple' ? QUESTION[k] : k}
+                    {level === 'simple' ? keys.question(k) : k}
                   </option>
                 ))}
               </Select>
@@ -522,6 +547,216 @@ function NewSchema({
   )
 }
 
+// ---------------------------------------------------------------- custom fields
+
+const TYPE_LABEL: Record<CustomFieldType, { simple: string; expert: string }> = {
+  text: { simple: 'words or a code', expert: 'text (eq, in, contains)' },
+  number: { simple: 'a number', expert: 'number (>, <, ≥, ≤)' },
+  id: { simple: 'an identifier', expert: 'id (eq, in; good for grouping)' },
+}
+
+function keyFromPath(path: string) {
+  return (path.split('.').pop() ?? path)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[^a-z]+|_$/g, '')
+}
+
+function guessType(f: FieldInfo | undefined): CustomFieldType {
+  if (!f) return 'text'
+  if (/(id|ref|key|number)$/i.test(f.path.split('.').pop() ?? '') || f.format === 'uuid' || f.format === 'id') return 'id'
+  if (f.type === 'number' || f.format === 'number') return 'number'
+  return 'text'
+}
+
+function NewFieldForm({
+  schema,
+  initialPath,
+  level,
+  onDone,
+  onCancel,
+}: {
+  schema: SchemaRecord
+  initialPath: string
+  level: Level
+  onDone: () => void
+  onCancel: () => void
+}) {
+  const keys = useKeys()
+  const [path, setPath] = useState(initialPath)
+  const field = schema.fields.find((f) => f.path === path)
+  const [key, setKey] = useState(keyFromPath(initialPath))
+  const [type, setType] = useState<CustomFieldType>(guessType(field))
+  const [description, setDescription] = useState('')
+  const [synonyms, setSynonyms] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ mapped: number; proposed: number } | null>(null)
+
+  const pickPath = (p: string) => {
+    setPath(p)
+    setKey(keyFromPath(p))
+    setType(guessType(schema.fields.find((f) => f.path === p)))
+  }
+  const exists = keys.all.includes(key)
+  const pathWord = (path.split('.').pop() ?? '').toLowerCase()
+
+  const save = async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      const syn = synonyms.split(',').map((x) => x.trim()).filter(Boolean)
+      if (pathWord && pathWord.replace(/[^a-z0-9]/g, '') !== key.replace(/[^a-z0-9]/g, '')) syn.push(pathWord)
+      const r = await api<{ backfill: { mapped: number; proposed: number } }>('/api/fields', {
+        body: {
+          field: { key, type, description: description || undefined, question: level === 'simple' ? description || undefined : undefined, synonyms: syn },
+          map: path ? { fingerprint: schema.fingerprint, path } : undefined,
+        },
+      })
+      setResult(r.backfill)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (result)
+    return (
+      <div className="mt-3 rounded-lg border border-green-300 bg-green-50/50 p-4 dark:border-green-500/30 dark:bg-green-500/5">
+        <p>
+          <strong>{key}</strong> {level === 'simple' ? 'saved.' : `added and mapped to ${path || '—'}.`}{' '}
+          {result.mapped + result.proposed === 0
+            ? level === 'simple'
+              ? 'No other message types have it yet; new ones are checked automatically.'
+              : 'Not found in other stored schemas; every new schema is checked for it automatically.'
+            : `Also found in ${result.mapped + result.proposed} other ${level === 'simple' ? 'message type' : 'schema'}${result.mapped + result.proposed > 1 ? 's' : ''}: ${result.mapped} mapped automatically, ${result.proposed} waiting for review.`}
+        </p>
+        <p className="mt-1 text-sm text-zinc-500">
+          {level === 'simple' ? 'You can now use it when deciding who gets alerted.' : (
+            <>
+              Use it in rules as <code>{key}</code> and in templates as <code>{`{{${key}}}`}</code>.
+            </>
+          )}
+        </p>
+        <Button className="mt-3" outline onClick={onDone}>
+          Close
+        </Button>
+      </div>
+    )
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg border border-zinc-950/10 p-4 dark:border-white/10">
+      <Subheading>{level === 'simple' ? 'Something else that matters' : 'New field'}</Subheading>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-zinc-500">{level === 'simple' ? 'Which part of the message' : 'Comes from'}</span>
+          <Select value={path} onChange={(e) => pickPath(e.target.value)}>
+            <option value="">{level === 'simple' ? '— not in this message —' : '— define only, map later —'}</option>
+            {schema.fields
+              .filter((f) => f.type !== 'array' && f.type !== 'null')
+              .map((f) => {
+                const v = show(getPath(schema.sample, f.path))
+                return (
+                  <option key={f.path} value={f.path}>
+                    {f.path}
+                    {v ? ` — e.g. ${v}` : ''}
+                  </option>
+                )
+              })}
+          </Select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-zinc-500">{level === 'simple' ? 'Short name' : 'Field key'}</span>
+          <Input value={key} onChange={(e) => setKey(e.target.value.toLowerCase())} className="font-mono" placeholder="amount" />
+          {exists && (
+            <span className="text-xs text-amber-700 dark:text-amber-400">
+              {keys.isCustom(key) ? 'Exists already: saving updates it.' : 'This is a built-in field; map it above instead.'}
+            </span>
+          )}
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-zinc-500">{level === 'simple' ? 'It holds' : 'Value type'}</span>
+          <Select value={type} onChange={(e) => setType(e.target.value as CustomFieldType)}>
+            {(Object.keys(TYPE_LABEL) as CustomFieldType[]).map((t) => (
+              <option key={t} value={t}>
+                {TYPE_LABEL[t][level === 'simple' ? 'simple' : 'expert']}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-zinc-500">{level === 'simple' ? 'What it means (a question)' : 'Description'}</span>
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={level === 'simple' ? 'How much money is involved?' : 'transaction amount in the original currency'}
+          />
+        </label>
+        <label className="space-y-1 sm:col-span-2">
+          <span className="text-xs font-medium text-zinc-500">
+            {level === 'simple' ? 'Other names it may have in other systems (comma separated)' : 'Synonyms (comma separated, used to find it in other sources)'}
+          </span>
+          <Input value={synonyms} onChange={(e) => setSynonyms(e.target.value)} placeholder="notional, value, amt, sum" />
+        </label>
+      </div>
+      {err && <p className="text-sm text-red-600">{err}</p>}
+      <div className="flex gap-2">
+        <Button color="dark/zinc" disabled={busy || !key || (exists && !keys.isCustom(key))} onClick={save}>
+          {level === 'simple' ? 'Save' : 'Add field'}
+        </Button>
+        <Button plain onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function CustomFields({ level, onChanged }: { level: Level; onChanged: () => void }) {
+  const keys = useKeys()
+  const [err, setErr] = useState('')
+  if (!keys.custom.length) return null
+  const remove = async (key: string) => {
+    if (!confirm(`Remove the field "${key}"? Its mapping is removed from every schema.`)) return
+    setErr('')
+    try {
+      await api(`/api/fields?key=${encodeURIComponent(key)}`, { method: 'DELETE' })
+      onChanged()
+    } catch (e) {
+      setErr((e as Error).message)
+    }
+  }
+  return (
+    <section className="mt-8">
+      <Subheading>{level === 'simple' ? 'Your own fields' : 'Custom fields'}</Subheading>
+      <ul className="mt-2 space-y-1">
+        {keys.custom.map((f) => (
+          <li key={f.key} className="flex items-start justify-between gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+            <div className="min-w-0">
+              <div className="font-mono font-medium">{f.key}</div>
+              <div className="truncate text-xs text-zinc-500">
+                {level === 'simple' ? f.question ?? f.description : `${f.type} · ${f.synonyms.join(', ')}`}
+              </div>
+            </div>
+            <Button plain aria-label={`Remove ${f.key}`} onClick={() => remove(f.key)}>
+              ✕
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {err && <p className="mt-1 text-sm text-red-600">{err}</p>}
+      {level === 'expert' && (
+        <p className="mt-1 text-xs text-zinc-500">
+          Stored in <code>config/fields.yaml</code>.
+        </p>
+      )}
+    </section>
+  )
+}
+
 // ---------------------------------------------------------------- stored schema
 
 function SchemaDetail({
@@ -553,8 +788,11 @@ function SchemaDetail({
     }
   }
 
+  const keys = useKeys()
+  const [newFieldFrom, setNewFieldFrom] = useState<string | null>(null)
   const pending = schema.proposals.filter((p) => p.state === 'pending')
-  const mapped = KEYS.filter((k) => schema.mapping[k]).length
+  const mapped = keys.all.filter((k) => schema.mapping[k]).length
+  const mappedPaths = new Set(Object.values(schema.mapping))
 
   return (
     <div className="space-y-8">
@@ -594,7 +832,7 @@ function SchemaDetail({
 
       <section>
         <Subheading>
-          {level === 'simple' ? 'What the message means' : 'Field mapping'} ({mapped}/{KEYS.length})
+          {level === 'simple' ? 'What the message means' : 'Field mapping'} ({mapped}/{keys.all.length})
         </Subheading>
         <MappingEditor
           fields={schema.fields}
@@ -606,6 +844,29 @@ function SchemaDetail({
           level={level}
           onChange={(k, p) => op({ op: 'map', canonical: k, path: p }, `m-${k}`)}
         />
+        {newFieldFrom === null ? (
+          <div className="mt-3">
+            <Button plain onClick={() => setNewFieldFrom(schema.fields.find((f) => !mappedPaths.has(f.path))?.path ?? '')}>
+              {level === 'simple' ? '+ Something else matters in these messages…' : '+ New field'}
+            </Button>
+            {level !== 'simple' && (
+              <span className="ml-2 text-sm text-zinc-500">
+                Add your own field (amount, region, customer…) so rules work on it across all sources.
+              </span>
+            )}
+          </div>
+        ) : (
+          <NewFieldForm
+            schema={schema}
+            initialPath={newFieldFrom}
+            level={level}
+            onDone={() => {
+              setNewFieldFrom(null)
+              reload()
+            }}
+            onCancel={() => setNewFieldFrom(null)}
+          />
+        )}
       </section>
 
       <div className="flex flex-wrap gap-2">
@@ -629,6 +890,7 @@ function SchemaDetail({
                 <th className="font-normal">Format</th>
                 <th className="font-normal">Example</th>
                 <th className="font-normal">Mapped to</th>
+                <th />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-950/5 dark:divide-white/5">
@@ -638,7 +900,14 @@ function SchemaDetail({
                   <td>{f.type}</td>
                   <td>{f.format}</td>
                   <td className="max-w-48 truncate">{show(getPath(schema.sample, f.path))}</td>
-                  <td>{KEYS.filter((k) => schema.mapping[k] === f.path).join(', ')}</td>
+                  <td>{keys.all.filter((k) => schema.mapping[k] === f.path).join(', ')}</td>
+                  <td className="text-right">
+                    {!mappedPaths.has(f.path) && f.type !== 'array' && f.type !== 'null' && (
+                      <Button plain onClick={() => setNewFieldFrom(f.path)}>
+                        + field
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -688,6 +957,31 @@ function Schemas() {
   useLive({ onChanged: (k) => k.includes('schema') && void load() })
 
   if (!data) return <Text>Loading…</Text>
+  return (
+    <KeysContext.Provider value={makeKeys(data.fields ?? [])}>
+      <SchemasBody data={data} level={level} selected={selected} setSelected={setSelected} adding={adding} setAdding={setAdding} load={load} />
+    </KeysContext.Provider>
+  )
+}
+
+function SchemasBody({
+  data,
+  level,
+  selected,
+  setSelected,
+  adding,
+  setAdding,
+  load,
+}: {
+  data: Data
+  level: Level
+  selected: string | null
+  setSelected: (fp: string) => void
+  adding: boolean
+  setAdding: (v: boolean) => void
+  load: () => Promise<void>
+}) {
+  const keys = useKeys()
   const schema = data.schemas.find((s) => s.fingerprint === selected)
   const review = data.schemas.filter((s) => s.status === 'needs-review').length
 
@@ -741,13 +1035,14 @@ function Schemas() {
                   </div>
                   <div className="text-xs text-zinc-500">
                     {s.source} · {s.eventCount.toLocaleString()} {level === 'simple' ? 'messages' : 'events'} ·{' '}
-                    {Object.keys(s.mapping).length}/{KEYS.length} {level === 'simple' ? 'answered' : 'mapped'}
+                    {keys.all.filter((k) => s.mapping[k]).length}/{keys.all.length} {level === 'simple' ? 'answered' : 'mapped'}
                   </div>
                 </button>
               </li>
             ))}
             {data.schemas.length === 0 && <Text>No messages yet.</Text>}
           </ul>
+          <CustomFields level={level} onChanged={load} />
         </div>
         <div>
           {schema ? (

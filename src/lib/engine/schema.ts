@@ -1,7 +1,10 @@
+import { rt } from './runtime'
 import {
-  CANONICAL_KEYS,
+  BUILTIN_KEYS,
+  type BuiltinKey,
   type Canonical,
   type CanonicalKey,
+  type CustomField,
   type FieldFormat,
   type FieldInfo,
   type Json,
@@ -13,7 +16,7 @@ import {
 } from './types'
 import { getPath, leaves, shortHash } from './util'
 
-export const CANONICAL_DESCRIPTIONS: Record<CanonicalKey, string> = {
+export const BUILTIN_DESCRIPTIONS: Record<BuiltinKey, string> = {
   severity: 'how bad it is (critical / error / warning / info)',
   service: 'system, service, workflow or producer that emitted the event',
   environment: 'deployment environment such as prod, uat, dev',
@@ -22,6 +25,27 @@ export const CANONICAL_DESCRIPTIONS: Record<CanonicalKey, string> = {
   timestamp: 'when it happened',
   entity_id: 'identifier of the affected business entity (workflow, trade, order, ...)',
   title: 'short name of what happened: event type, alert name, subject',
+}
+
+const isBuiltin = (key: string): key is BuiltinKey => (BUILTIN_KEYS as readonly string[]).includes(key)
+
+export function customField(key: string): CustomField | undefined {
+  return rt().fields.find((f) => f.key === key)
+}
+
+/** Built-in keys first, then custom fields in config order. */
+export function allKeys(): CanonicalKey[] {
+  return [...BUILTIN_KEYS, ...rt().fields.map((f) => f.key)]
+}
+
+export function isCanonicalKey(key: unknown): key is CanonicalKey {
+  return typeof key === 'string' && (isBuiltin(key) || Boolean(customField(key)))
+}
+
+export function canonicalDescriptions(): Record<CanonicalKey, string> {
+  const out: Record<CanonicalKey, string> = { ...BUILTIN_DESCRIPTIONS }
+  for (const f of rt().fields) out[f.key] = f.description
+  return out
 }
 
 const CURRENCIES = new Set(['EUR', 'USD', 'GBP', 'PLN', 'CHF', 'JPY', 'CAD', 'AUD', 'SEK', 'NOK', 'CZK', 'HUF', 'CNY', 'HKD', 'SGD'])
@@ -128,8 +152,8 @@ type Tokens = ReturnType<typeof tokens>
 
 // ---------------------------------------------------------------- layer 1: deterministic synonyms + value format
 
-const SYNONYMS: Record<CanonicalKey, string[]> = {
-  severity: ['severity', 'sev', 'level', 'loglevel', 'priority', 'urgency', 'criticality'],
+const SYNONYMS: Record<BuiltinKey, string[]> = {
+  severity: ['severity', 'sev', 'lvl', 'level', 'loglevel', 'priority', 'urgency', 'criticality'],
   service: [
     'service',
     'servicename',
@@ -175,7 +199,7 @@ const SYNONYMS: Record<CanonicalKey, string[]> = {
 }
 
 /** For the fuzzy tiebreak: a word of the field name must start with one of these, so error_count never becomes error.code. */
-const DISTINGUISHING: Record<CanonicalKey, string[]> = {
+const DISTINGUISHING: Record<BuiltinKey, string[]> = {
   severity: ['sev', 'level', 'lvl', 'prio', 'urg', 'crit'],
   service: ['serv', 'svc', 'app', 'comp', 'sys', 'host', 'job', 'produc'],
   environment: ['env', 'stage', 'tier'],
@@ -190,9 +214,9 @@ const TECHNICAL_IDS = ['requestid', 'traceid', 'spanid', 'correlationid', 'messa
 
 type Scorer = (f: FieldInfo, value: unknown, t: Tokens) => [number, string] | null
 
-const named = (key: CanonicalKey, t: Tokens) => SYNONYMS[key].includes(t.norm)
+const named = (key: BuiltinKey, t: Tokens) => SYNONYMS[key].includes(t.norm)
 
-const SCORERS: Record<CanonicalKey, Scorer> = {
+const SCORERS: Record<BuiltinKey, Scorer> = {
   severity: (f, v, t) => {
     if (!named('severity', t)) return null
     return normalizeSeverity(v) ? [0.95, `name "${t.last}" + severity-like value`] : [0.6, `name "${t.last}" but unknown value`]
@@ -228,6 +252,30 @@ const SCORERS: Record<CanonicalKey, Scorer> = {
     if (f.format === 'text' && !['title', 'subject'].includes(t.norm)) return null
     return [t.depth <= 2 ? 0.9 : 0.7, `name "${t.last}"`]
   },
+}
+
+/** Does the value look like what a custom field of this type holds? */
+function fitsType(type: CustomField['type'], f: FieldInfo, v: unknown): boolean {
+  if (f.type === 'array' || f.type === 'null') return false
+  if (type === 'number') return typeof v === 'number' || (typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v.trim()))
+  if (type === 'id') return (f.type === 'string' && f.format !== 'text') || (typeof v === 'number' && Number.isInteger(v))
+  return true
+}
+
+/** Custom fields have no hand-tuned heuristic: a synonym name match, checked against the declared value type. */
+function customScorer(def: CustomField): Scorer {
+  return (f, v, t) => {
+    if (!def.synonyms.includes(t.norm)) return null
+    return fitsType(def.type, f, v)
+      ? [0.9, `name "${t.last}" (custom field, ${def.type} value)`]
+      : [0.6, `name "${t.last}" but the value is not a ${def.type}`]
+  }
+}
+
+function scorerFor(key: CanonicalKey): Scorer | undefined {
+  if (isBuiltin(key)) return SCORERS[key]
+  const def = customField(key)
+  return def ? customScorer(def) : undefined
 }
 
 export const AUTO_ACCEPT = 0.75
@@ -267,10 +315,19 @@ export const FUZZY_PROPOSE = 0.82
 
 export function fuzzyScore(key: CanonicalKey, path: string): { score: number; synonym: string } | null {
   const t = tokens(path)
-  const distinguishing = DISTINGUISHING[key]
-  if (!t.words.some((w) => distinguishing.some((d) => w.startsWith(d)))) return null
+  let synonyms: string[]
+  if (isBuiltin(key)) {
+    const distinguishing = DISTINGUISHING[key]
+    if (!t.words.some((w) => distinguishing.some((d) => w.startsWith(d)))) return null
+    synonyms = SYNONYMS[key]
+  } else {
+    // Custom fields: a word of the field name must share its first letters with a synonym (amount_eur ~ amount).
+    synonyms = customField(key)?.synonyms ?? []
+    const stems = synonyms.filter((s) => s.length >= 4)
+    if (!t.words.some((w) => w.length >= 3 && stems.some((s) => s.startsWith(w.slice(0, 4))))) return null
+  }
   let best = { score: 0, synonym: '' }
-  for (const syn of SYNONYMS[key]) {
+  for (const syn of synonyms) {
     if (syn.length < 4) continue
     const score = jaroWinkler(t.norm, syn)
     if (score > best.score) best = { score, synonym: syn }
@@ -283,7 +340,7 @@ export function fuzzyScore(key: CanonicalKey, path: string): { score: number; sy
 interface KnownFormat {
   name: string
   test: (raw: Record<string, unknown>) => boolean
-  mapping: Partial<Record<CanonicalKey, string[]>>
+  mapping: Partial<Record<BuiltinKey, string[]>>
   resolved?: (raw: unknown) => boolean
 }
 
@@ -342,9 +399,11 @@ export function computeMapping(raw: unknown, fields: FieldInfo[]): MappingResult
   }
 
   const scored: { key: CanonicalKey; path: string; score: number; reason: string }[] = []
-  for (const key of CANONICAL_KEYS) {
+  const keys = allKeys()
+  for (const key of keys) {
+    const scorer = scorerFor(key)!
     for (const f of fields) {
-      const s = SCORERS[key](f, getPath(raw, f.path), tokens(f.path))
+      const s = scorer(f, getPath(raw, f.path), tokens(f.path))
       if (s && s[0] >= PROPOSE) scored.push({ key, path: f.path, score: s[0], reason: s[1] })
     }
   }
@@ -363,7 +422,7 @@ export function computeMapping(raw: unknown, fields: FieldInfo[]): MappingResult
     result.proposals.push({ canonical: s.key, path: s.path, confidence: s.score, by: 'fuzzy', reason: s.reason })
   }
 
-  for (const key of CANONICAL_KEYS) {
+  for (const key of keys) {
     if (result.mapping[key]) continue
     const best = fields
       .filter((f) => !used.has(f.path) && f.type !== 'array' && f.type !== 'null')
@@ -383,6 +442,39 @@ export function computeMapping(raw: unknown, fields: FieldInfo[]): MappingResult
     }
   }
   return result
+}
+
+/**
+ * Best field for one key, for backfilling a newly added custom field into stored schemas.
+ * `auto` follows the same thresholds as computeMapping; otherwise the result is a proposal for a human.
+ */
+export function bestFieldFor(
+  key: CanonicalKey,
+  raw: unknown,
+  fields: FieldInfo[],
+  used: Set<string>
+): { path: string; score: number; reason: string; by: 'deterministic' | 'fuzzy'; auto: boolean } | null {
+  const scorer = scorerFor(key)
+  if (!scorer) return null
+  const free = fields.filter((f) => !used.has(f.path) && f.type !== 'array' && f.type !== 'null')
+  let best: { path: string; score: number; reason: string } | null = null
+  for (const f of free) {
+    const s = scorer(f, getPath(raw, f.path), tokens(f.path))
+    if (s && s[0] >= PROPOSE && (!best || s[0] > best.score)) best = { path: f.path, score: s[0], reason: s[1] }
+  }
+  if (best) return { ...best, by: 'deterministic', auto: best.score >= AUTO_ACCEPT }
+  const fuzzy = free
+    .map((f) => ({ f, m: fuzzyScore(key, f.path) }))
+    .filter((x) => x.m)
+    .sort((a, b) => b.m!.score - a.m!.score)[0]
+  if (!fuzzy) return null
+  return {
+    path: fuzzy.f.path,
+    score: fuzzy.m!.score,
+    reason: `"${tokens(fuzzy.f.path).last}" ≈ "${fuzzy.m!.synonym}" (${Math.round(fuzzy.m!.score * 100)}%)`,
+    by: 'fuzzy',
+    auto: fuzzy.m!.score >= FUZZY_ACCEPT,
+  }
 }
 
 /** A schema is "mapped" when we can say what happened and how bad it is without a human. */
@@ -408,6 +500,9 @@ export function normalize(raw: unknown, schema: Pick<SchemaRecord, 'mapping' | '
     } else if (key === 'timestamp') {
       const t = normalizeTimestamp(v)
       if (t) out.timestamp = t
+    } else if (customField(key)?.type === 'number') {
+      const n = typeof v === 'number' ? v : Number(String(v).trim())
+      out[key] = isNaN(n) ? String(v) : String(n)
     } else {
       out[key] = typeof v === 'object' ? JSON.stringify(v) : String(v)
     }

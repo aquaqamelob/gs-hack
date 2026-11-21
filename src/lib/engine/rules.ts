@@ -1,5 +1,5 @@
-import { normalizeSeverity } from './schema'
-import { CANONICAL_KEYS, CHANNELS, SEVERITIES, SEVERITY_RANK, type CanonicalKey, type Condition, type EventView, type Json, type Rule } from './types'
+import { isCanonicalKey, normalizeSeverity } from './schema'
+import { CHANNELS, SEVERITIES, SEVERITY_RANK, type CanonicalKey, type Condition, type EventView, type Json, type Rule } from './types'
 import { durationSec, getPath, globToRegex } from './util'
 
 /** Canonical fields first, then `source`/`schema`, then any raw path (optionally prefixed with `raw.`). */
@@ -7,8 +7,8 @@ export function resolveField(ev: EventView, path: string): unknown {
   if (path === 'source') return ev.source
   if (path === 'schema') return ev.schemaName
   if (path.startsWith('raw.')) return getPath(ev.raw, path.slice(4))
-  if ((CANONICAL_KEYS as readonly string[]).includes(path)) {
-    const v = ev.canonical[path as CanonicalKey]
+  if (isCanonicalKey(path)) {
+    const v = ev.canonical[path]
     if (v !== undefined) return v
   }
   return getPath(ev.raw, path)

@@ -7,7 +7,8 @@ export const CHANNELS: Channel[] = ['phone', 'sms', 'email', 'ui']
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
-export const CANONICAL_KEYS = [
+/** Built-in canonical fields. The automapper has hand-tuned heuristics for each of them. */
+export const BUILTIN_KEYS = [
   'severity',
   'service',
   'environment',
@@ -17,8 +18,28 @@ export const CANONICAL_KEYS = [
   'entity_id',
   'title',
 ] as const
-export type CanonicalKey = (typeof CANONICAL_KEYS)[number]
-export type Canonical = Partial<Record<CanonicalKey, string>> & { resolved?: boolean }
+export type BuiltinKey = (typeof BUILTIN_KEYS)[number]
+/** @deprecated use BUILTIN_KEYS (built-in only) or allKeys() (built-in + custom fields). */
+export const CANONICAL_KEYS = BUILTIN_KEYS
+/** A built-in key or a custom field key from config/fields.yaml. */
+export type CanonicalKey = string
+export type Canonical = Partial<Record<BuiltinKey, string>> & { resolved?: boolean } & {
+  [key: string]: string | boolean | undefined
+}
+
+export type CustomFieldType = 'text' | 'number' | 'id'
+export const CUSTOM_FIELD_TYPES: CustomFieldType[] = ['text', 'number', 'id']
+
+/** A canonical field added by users (config/fields.yaml). Mapped like built-ins, with a generic scorer. */
+export interface CustomField {
+  key: string
+  description: string
+  /** Plain-language question shown at the "simple" readability level. */
+  question?: string
+  /** Field names that usually hold this value, e.g. amount, notional, value. */
+  synonyms: string[]
+  type: CustomFieldType
+}
 
 export type FieldFormat =
   | 'iso-datetime'

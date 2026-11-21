@@ -405,8 +405,8 @@ export function RuleEditor({
           <section>
             <div className="text-sm font-semibold">1. Which events?</div>
             <Text>
-              Use canonical fields (severity, service, environment, title, error.code, entity_id…), <code>source</code>,
-              or any raw path from the event.
+              Use canonical fields (severity, service, environment, title, error.code, entity_id…), custom fields
+              added under Sources &amp; schemas, <code>source</code>, or any raw path from the event.
             </Text>
             <div className="mt-3">
               <ConditionEditor when={rule.when} fields={meta.fields} onChange={(when) => patch({ when })} />
